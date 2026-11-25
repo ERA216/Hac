@@ -7,46 +7,64 @@ import json
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 
-from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 
 from . import __version__
+from .config import ROOT, llm_from_env, load_env
 from .document import SUPPORTED, load_document
-from .llm import LLMClient, LLMError, _Gemini
+from .llm import LLMError, _Gemini
 from .orchestrator import Pipeline
 from .report import write_reports
 from .schemas import Question
 
-ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MODELS = {"gemini": "gemini-3.8-flash", "openai": "gpt-4o-mini"}
-DEFAULT_FALLBACKS = {"gemini": "gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-2.5-flash", "openai": ""}
-
 
 class ConsoleProgress:
+    """Одна строка-индикатор для всех активных шагов (ревьюеры работают параллельно)."""
+
     def __init__(self, console: Console):
         self.console = console
-        self._status = None
+        self.active: list[str] = []
+        self.status = None
+        self.lock = threading.Lock()
+
+    def _refresh(self):
+        if self.active:
+            label = "[bold cyan]Работают: " + ", ".join(self.active) + "…"
+            if self.status is None:
+                self.status = self.console.status(label)
+                self.status.start()
+            else:
+                self.status.update(label)
+        elif self.status is not None:
+            self.status.stop()
+            self.status = None
 
     def start(self, title):
-        self._status = self.console.status(f"[bold cyan]{title}…")
-        self._status.start()
+        with self.lock:
+            self.active.append(title)
+            self._refresh()
 
-    def _stop(self):
-        if self._status:
-            self._status.stop()
-            self._status = None
+    def _finish(self, title, line):
+        with self.lock:
+            if title in self.active:
+                self.active.remove(title)
+            if self.status is not None:
+                self.status.stop()
+                self.status = None
+            self.console.print(line)
+            self._refresh()
 
     def done(self, title, note):
-        self._stop()
-        self.console.print(f"[green]✔[/] {title}: {note}")
+        self._finish(title, f"[green]✔[/] {title}: {note}")
 
     def warn(self, message):
-        self._stop()
-        self.console.print(f"[yellow]⚠ {message}[/]")
+        title = message.split(":", 1)[0]
+        self._finish(title, f"[yellow]⚠ {message}[/]")
 
 
 def _ask_in_console(console: Console):
@@ -61,8 +79,6 @@ def _ask_in_console(console: Console):
             for i, o in enumerate(q.options, start=1):
                 console.print(f"  [cyan]{i}[/]. {o}")
             raw = Prompt.ask("Ответ", default="", show_default=False).strip()
-            if raw.isdigit() and 1 <= int(raw) <= len(q.options):
-                raw = q.options[int(raw) - 1]
             if raw:
                 answers[q.qid] = raw
         return answers
@@ -73,22 +89,10 @@ def _ask_in_console(console: Console):
 def _answers_from_file(path: Path):
     text = path.read_text(encoding="utf-8")
     try:
-        data = json.loads(text)
-        answers = {k: str(v) for k, v in data.items()}
+        answers = {k: str(v) for k, v in json.loads(text).items()}
     except json.JSONDecodeError:  # формат «Q-01: ответ» построчно
         answers = {m.group(1): m.group(2).strip() for m in re.finditer(r"^(Q-\d+)\s*[:.)-]\s*(.+)$", text, re.M)}
-
-    def ask(questions: list[Question]) -> dict[str, str]:
-        out = {}
-        for q in questions:
-            a = answers.get(q.qid, "")
-            if a.isdigit() and 1 <= int(a) <= len(q.options):
-                a = q.options[int(a) - 1]
-            if a:
-                out[q.qid] = a
-        return out
-
-    return ask
+    return lambda questions: answers
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -97,21 +101,21 @@ def build_parser() -> argparse.ArgumentParser:
         description="Ревизор ТЗ — мультиагентная проверка документа требований (ISO/IEC/IEEE 29148, IEEE 830).",
     )
     p.add_argument("input", nargs="?", help=f"файл требований ({', '.join(sorted(SUPPORTED))})")
-    p.add_argument("report", nargs="?", help="путь к файлу отчёта (.md); рядом будет .json")
-    p.add_argument("--provider", choices=["gemini", "openai"], default=os.getenv("LLM_PROVIDER", "gemini"),
+    p.add_argument("report", nargs="?", help="путь к отчёту (.md); рядом появятся .html и .json")
+    p.add_argument("--provider", choices=["gemini", "openai"], default=None,
                    help="провайдер LLM (openai — любой OpenAI-совместимый API, включая Ollama)")
     p.add_argument("--model", help="модель (по умолчанию из .env)")
     p.add_argument("--fallback-models", help="резервные модели через запятую (при перегрузке, 404 или исчерпании квоты)")
-    p.add_argument("--base-url", default=os.getenv("OPENAI_BASE_URL"), help="адрес OpenAI-совместимого API")
+    p.add_argument("--base-url", help="адрес OpenAI-совместимого API")
     p.add_argument("--interactive", "-i", action="store_true", help="задать уточняющие вопросы в консоли и перепроверить")
     p.add_argument("--answers", type=Path, help="файл ответов на вопросы (JSON {\"Q-01\": \"…\"} или строки «Q-01: …»)")
     p.add_argument("--replay", action="store_true", help="только сохранённые ответы модели (без сети и ключа)")
     p.add_argument("--no-cache", action="store_true", help="не использовать кэш ответов модели")
     p.add_argument("--cache-dir", type=Path, default=ROOT / ".cache" / "llm")
-    p.add_argument("--max-calls", type=int, default=int(os.getenv("LLM_MAX_CALLS", "12")),
-                   help="бюджет новых вызовов LLM на прогон (по умолчанию 12)")
-    p.add_argument("--rpm", type=float, default=float(os.getenv("LLM_RPM", "5")),
-                   help="ограничение запросов в минуту (бесплатный Gemini — 5)")
+    p.add_argument("--max-calls", type=int, default=None, help="бюджет новых вызовов LLM на прогон (по умолчанию 12)")
+    p.add_argument("--rpm", type=float, default=None, help="ограничение запросов в минуту (бесплатный Gemini — 5)")
+    p.add_argument("--parallel", type=int, default=int(os.getenv("LLM_PARALLEL", "4")),
+                   help="сколько ревьюеров работают одновременно (1 — последовательно)")
     p.add_argument("--list-models", action="store_true", help="показать доступные модели и выйти")
     p.add_argument("--version", action="version", version=f"revizor {__version__}")
     return p
@@ -121,47 +125,31 @@ def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
-    load_dotenv(Path.cwd() / ".env")
-    load_dotenv(ROOT / ".env")
-    args = build_parser().parse_args(argv)
+    load_env()
+    parser = build_parser()
+    args = parser.parse_args(argv)
     console = Console()
 
-    if args.provider == "gemini":
-        api_key = os.getenv("GEMINI_API_KEY", "")
-        model = args.model or os.getenv("GEMINI_MODEL") or DEFAULT_MODELS["gemini"]
-        fallbacks = args.fallback_models or os.getenv("GEMINI_FALLBACK_MODELS") or DEFAULT_FALLBACKS["gemini"]
-    else:
-        api_key = os.getenv("OPENAI_API_KEY", "")
-        model = args.model or os.getenv("OPENAI_MODEL") or DEFAULT_MODELS["openai"]
-        fallbacks = args.fallback_models or os.getenv("OPENAI_FALLBACK_MODELS") or ""
-
     if args.list_models:
-        if args.provider != "gemini":
-            console.print("[yellow]--list-models поддерживается для Gemini.[/]")
-            return 2
-        for name in _Gemini.list_models(api_key):
+        for name in _Gemini.list_models(os.getenv("GEMINI_API_KEY", "")):
             console.print(name)
         return 0
 
     if not args.input or not args.report:
-        build_parser().print_usage()
+        parser.print_usage()
         console.print("[red]Укажите файл требований и путь к отчёту.[/]")
         return 2
 
-    temperature = os.getenv("LLM_TEMPERATURE")
-    llm = LLMClient(
+    llm = llm_from_env(
         provider=args.provider,
-        model=model,
-        api_key=api_key,
+        model=args.model,
+        fallback_models=args.fallback_models,
         base_url=args.base_url,
         cache_dir=None if args.no_cache else args.cache_dir,
         replay=args.replay,
-        rpm=args.rpm,
         max_calls=args.max_calls,
-        temperature=float(temperature) if temperature else None,
-        thinking_level=os.getenv("GEMINI_THINKING_LEVEL") or None,
+        rpm=args.rpm,
         on_wait=lambda msg: console.print(f"[dim]… {msg}[/]"),
-        fallback_models=[m.strip() for m in fallbacks.split(",") if m.strip()],
     )
 
     try:
@@ -172,16 +160,11 @@ def main(argv: list[str] | None = None) -> int:
 
     console.print(Panel.fit(
         f"[bold]Ревизор ТЗ[/] {__version__}\nДокумент: [cyan]{doc.title}[/] ({doc.path.name}, {len(doc.lines)} строк)\n"
-        f"Модель: {args.provider} / {model}" + (" [dim](replay)[/]" if args.replay else ""),
+        f"Модель: {llm.provider} / {llm.model}" + (" [dim](replay)[/]" if args.replay else ""),
         border_style="cyan"))
 
-    ask = None
-    if args.answers:
-        ask = _answers_from_file(args.answers)
-    elif args.interactive:
-        ask = _ask_in_console(console)
-
-    pipeline = Pipeline(llm, progress=ConsoleProgress(console), ask_answers=ask)
+    ask = _answers_from_file(args.answers) if args.answers else _ask_in_console(console) if args.interactive else None
+    pipeline = Pipeline(llm, progress=ConsoleProgress(console), ask_answers=ask, parallel=args.parallel)
     try:
         state = pipeline.run(doc)
     except LLMError as e:
@@ -197,10 +180,12 @@ def main(argv: list[str] | None = None) -> int:
         paths.append(ans_path)
 
     verdict = "[green]можно начинать разработку[/]" if state.ready_for_development else "[red]не готов к разработке[/]"
+    resolved = sum(1 for f in state.findings if not f.is_open)
     console.print(Panel.fit(
         f"Требований: {len(state.requirements)} · дефектов: {len(state.open_findings)} "
         f"(🔴 {state.count('critical')} · 🟠 {state.count('major')} · 🟡 {state.count('minor')}) · "
-        f"вопросов: {len(state.questions)}\nИтог: {verdict}\n"
+        f"вопросов: {len(state.questions)}" + (f" · закрыто уточнениями: {resolved}" if resolved else "")
+        + f"\nИтог: {verdict}\n"
         f"Вызовов LLM: {llm.real_calls} новых, {len(llm.calls) - llm.real_calls} из кэша\n"
         + "\n".join(f"Отчёт: {p}" for p in paths),
         title="Готово", border_style="green"))

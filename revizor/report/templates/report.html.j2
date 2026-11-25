@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ревизор ТЗ — {{ title | e }}</title>
+<style>
+:root{
+  --bg:#f6f7f9;--panel:#fff;--ink:#16181d;--muted:#5d6472;--line:#e3e6eb;--soft:#eef1f5;
+  --accent:#1f6feb;--accent-soft:#e7f0ff;
+  --crit:#d1242f;--crit-soft:#fde8e9;--major:#c96a00;--major-soft:#fff1de;--minor:#9a7d00;--minor-soft:#fdf7d7;
+  --ok:#1a7f37;--ok-soft:#e3f5e8;--mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1115;--panel:#171a21;--ink:#e7e9ee;--muted:#9aa3b2;--line:#2a2f3a;--soft:#1e222b;
+  --accent:#4c8dff;--accent-soft:#1a2740;
+  --crit:#ff6b6b;--crit-soft:#3a1d21;--major:#ffa94d;--major-soft:#3a2a17;--minor:#e6c84f;--minor-soft:#33301a;
+  --ok:#4ade80;--ok-soft:#173022;}}
+:root[data-theme="dark"]{
+  --bg:#0f1115;--panel:#171a21;--ink:#e7e9ee;--muted:#9aa3b2;--line:#2a2f3a;--soft:#1e222b;
+  --accent:#4c8dff;--accent-soft:#1a2740;
+  --crit:#ff6b6b;--crit-soft:#3a1d21;--major:#ffa94d;--major-soft:#3a2a17;--minor:#e6c84f;--minor-soft:#33301a;
+  --ok:#4ade80;--ok-soft:#173022;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.wrap{max-width:1240px;margin:0 auto;padding:24px 16px 64px}
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:space-between}
+h1{font-size:24px;margin:0 0 4px}
+.sub{color:var(--muted);font-size:13px}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-weight:600;font-size:13px}
+.verdict{padding:10px 16px;border-radius:12px;font-weight:700;font-size:16px}
+.verdict.no{background:var(--crit-soft);color:var(--crit)}
+.verdict.yes{background:var(--ok-soft);color:var(--ok)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:20px 0}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.kpi b{display:block;font-size:26px;line-height:1.1}
+.kpi span{color:var(--muted);font-size:13px}
+.kpi.crit b{color:var(--crit)}.kpi.major b{color:var(--major)}.kpi.minor b{color:var(--minor)}.kpi.ok b{color:var(--ok)}
+nav{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:16px;position:sticky;top:0;background:var(--bg);z-index:5;padding-top:6px}
+nav button{border:0;background:none;color:var(--muted);padding:10px 12px;font:inherit;font-weight:600;cursor:pointer;border-bottom:2px solid transparent}
+nav button.active{color:var(--accent);border-bottom-color:var(--accent)}
+.panel{display:none}.panel.active{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+.card h3{margin:0 0 8px;font-size:16px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.sev-critical{border-left:4px solid var(--crit)}.sev-major{border-left:4px solid var(--major)}.sev-minor{border-left:4px solid var(--minor)}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;background:var(--soft);color:var(--muted);margin:2px 4px 2px 0}
+.pill.critical{background:var(--crit-soft);color:var(--crit)}.pill.major{background:var(--major-soft);color:var(--major)}.pill.minor{background:var(--minor-soft);color:var(--minor)}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.meta{color:var(--muted);font-size:13px}
+.quote{display:block;border-left:3px solid var(--accent);background:var(--accent-soft);padding:6px 10px;margin:6px 0;border-radius:4px;cursor:pointer}
+.quote small{display:block;color:var(--muted)}
+.rewrite{background:var(--ok-soft);border-radius:8px;padding:8px 10px;margin-top:8px}
+dl{margin:8px 0 0;display:grid;grid-template-columns:150px 1fr;gap:4px 12px}
+dt{color:var(--muted);font-size:13px}dd{margin:0}
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center}
+.filters input,.filters select{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:5px 10px;border-radius:999px;cursor:pointer;font:inherit;font-size:13px}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+table{border-collapse:collapse;width:100%;background:var(--panel);font-size:13px}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+th{background:var(--soft);position:sticky;top:44px}
+.scroll{overflow-x:auto;border-radius:12px;border:1px solid var(--line)}
+.doc{font-family:var(--mono);font-size:12.5px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+.ln{display:grid;grid-template-columns:52px 1fr 150px;border-bottom:1px solid transparent}
+.ln .n{color:var(--muted);text-align:right;padding:1px 10px 1px 0;user-select:none}
+.ln .t{white-space:pre-wrap;word-break:break-word;padding:1px 8px}
+.ln .m{padding:1px 8px;font-family:system-ui,sans-serif;font-size:11px}
+.ln.h-critical{background:var(--crit-soft)}.ln.h-major{background:var(--major-soft)}.ln.h-minor{background:var(--minor-soft)}
+.ln.flash{outline:2px solid var(--accent)}
+.ln .m a{color:inherit;font-weight:700;margin-right:4px;text-decoration:none;cursor:pointer}
+.heat td{text-align:center;min-width:34px}
+.heat th{position:static}
+.heat td.c-critical{background:var(--crit);color:#fff}.heat td.c-major{background:var(--major);color:#fff}.heat td.c-minor{background:var(--minor);color:#fff}
+.heat th.v{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;height:150px;font-weight:600}
+.opt{display:flex;gap:8px;align-items:flex-start;margin:4px 0;cursor:pointer}
+textarea{width:100%;font:inherit;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--panel);color:var(--ink)}
+.btn{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer}
+.btn.ghost{background:var(--soft);color:var(--ink)}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+code{font-family:var(--mono);font-size:12.5px;background:var(--soft);padding:1px 5px;border-radius:4px}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 16px}
+.flow span{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px}
+.flow i{color:var(--muted);font-style:normal}
+.theme{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 10px;cursor:pointer;font:inherit}
+@media (max-width:720px){.ln{grid-template-columns:40px 1fr}.ln .m{grid-column:2}dl{grid-template-columns:1fr}}
+@media print{nav,.filters,.toolbar,.theme{display:none}.panel{display:block!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <div class="sub">Ревизор ТЗ · отчёт о проверке требований</div>
+    <h1 id="title"></h1>
+    <div class="sub" id="passport-line"></div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <div id="verdict" class="verdict"></div>
+    <button class="theme" id="theme" title="Светлая/тёмная тема">◐</button>
+  </div>
+</header>
+<section class="kpis" id="kpis"></section>
+<nav id="tabs">
+  <button data-tab="defects" class="active">Дефекты</button>
+  <button data-tab="doc">Документ</button>
+  <button data-tab="reqs">Требования</button>
+  <button data-tab="questions">Уточняющие вопросы</button>
+  <button data-tab="checklist">Чек-лист</button>
+  <button data-tab="tests">Тест-кейсы</button>
+  <button data-tab="run">Как работал агент</button>
+</nav>
+<section class="panel active" id="p-defects"></section>
+<section class="panel" id="p-doc"></section>
+<section class="panel" id="p-reqs"></section>
+<section class="panel" id="p-questions"></section>
+<section class="panel" id="p-checklist"></section>
+<section class="panel" id="p-tests"></section>
+<section class="panel" id="p-run"></section>
+</div>
+<script id="data" type="application/json">{{ data_json }}</script>
+<script>
+const D = JSON.parse(document.getElementById('data').textContent);
+const SEV = {critical:'Критично', major:'Существенно', minor:'Замечание'};
+const SEV_RANK = {critical:0, major:1, minor:2};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const crit = c => (D.criteria[c] || {name:c}).name;
+const who = list => (list||[]).map(s => s.startsWith('правила:') ? 'Правило ' + s.slice(8) : (D.agent_names[s] || s)).join(', ');
+const reqById = Object.fromEntries(D.requirements.map(r => [r.rid, r]));
+const $ = id => document.getElementById(id);
+
+// ---------- header
+$('title').textContent = D.passport.document_title;
+const p = D.passport;
+$('passport-line').textContent = `${p.file} · ${new Date(p.started_at).toLocaleString('ru-RU')} · модель ${p.model_versions.join(', ') || p.model} · ${p.agent_version}`;
+const ready = D.verdict.ready_for_development;
+$('verdict').className = 'verdict ' + (ready ? 'yes' : 'no');
+$('verdict').textContent = ready ? '✅ Можно в разработку' : '❌ Не готов к разработке';
+const C = D.counts;
+$('kpis').innerHTML = [
+  ['', C.requirements, 'требований выделено'],
+  ['crit', C.critical, 'критичных дефектов'],
+  ['major', C.major, 'существенных'],
+  ['minor', C.minor, 'замечаний'],
+  ['', C.questions, `уточняющих вопросов (${C.blocking} блок.)`],
+  ['ok', `${p.quotes_verified}/${p.quotes_checked}`, 'цитат подтверждено в документе'],
+].map(([cls, v, l]) => `<div class="kpi ${cls}"><b>${esc(v)}</b><span>${esc(l)}</span></div>`).join('');
+
+// ---------- tabs
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => openTab(b.dataset.tab));
+function openTab(name){
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.panel').forEach(s => s.classList.toggle('active', s.id === 'p-' + name));
+}
+$('theme').onclick = () => {
+  const r = document.documentElement; const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const cur = r.dataset.theme || (dark ? 'dark' : 'light'); r.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+};
+
+// ---------- defects
+const state = {sev:new Set(['critical','major','minor']), crit:'', q:'', open:true};
+function reqChip(rid){ const r = reqById[rid]; return `<span class="pill" title="${esc(r ? r.summary : '')}">${esc(rid)}${r && r.source_id ? ' · ' + esc(r.source_id) : ''}</span>`; }
+function defectCard(f){
+  const ev = f.evidence.map(e => `<span class="quote" data-line="${e.line_start}">«${esc(e.quote)}»<small>${esc(e.location)}</small></span>`).join('');
+  const status = f.status === 'resolved' ? `<span class="pill ok">закрыто уточнением</span>` : f.status === 'changed' ? `<span class="pill">изменено после уточнения</span>` : '';
+  return `<article class="card sev-${f.severity}" id="${f.fid}">
+    <h3><span class="pill ${f.severity}">${SEV[f.severity]}</span>${esc(f.fid)}. ${esc(f.title)} ${status}</h3>
+    <div class="meta">${esc(crit(f.criterion))} — ${esc((D.criteria[f.criterion]||{}).source||'')} · обнаружили: ${esc(who(f.sources))}</div>
+    <div>${f.requirement_ids.map(reqChip).join('')}</div>
+    ${ev}
+    <dl><dt>Проблема</dt><dd>${esc(f.problem)}</dd><dt>Что исправить</dt><dd>${esc(f.recommendation)}</dd>
+    ${f.status_comment ? `<dt>После уточнения</dt><dd>${esc(f.status_comment)}</dd>` : ''}</dl>
+    ${f.rewrite ? `<div class="rewrite"><b>Предлагаемая формулировка:</b> ${esc(f.rewrite)}</div>` : ''}
+  </article>`;
+}
+function renderDefects(){
+  const crits = [...new Set(D.findings.map(f => f.criterion))];
+  const list = D.findings.filter(f => state.sev.has(f.severity) && (!state.crit || f.criterion === state.crit)
+     && (!state.open || f.status !== 'resolved')
+     && (!state.q || (f.title + f.problem + f.recommendation + f.evidence.map(e=>e.quote).join(' ')).toLowerCase().includes(state.q)));
+  const prio = D.findings.filter(f => f.priority > 0 && f.status !== 'resolved').sort((a,b) => a.priority - b.priority);
+  $('p-defects').innerHTML = `
+    <div class="card"><h3>Итог</h3><div>${esc(D.verdict.summary)}</div>
+      ${prio.length ? `<p class="meta" style="margin-bottom:4px">Исправить в первую очередь:</p><ol style="margin:0">${prio.map(f => `<li><a href="#${f.fid}">${esc(f.fid)}</a> — ${esc(f.title)}</li>`).join('')}</ol>` : ''}
+    </div>
+    <div class="filters">
+      ${['critical','major','minor'].map(s => `<button class="chip ${state.sev.has(s)?'on':''}" data-sev="${s}">${SEV[s]}</button>`).join('')}
+      <select id="f-crit"><option value="">Все критерии</option>${crits.map(c => `<option value="${c}" ${state.crit===c?'selected':''}>${esc(crit(c))}</option>`).join('')}</select>
+      <input id="f-q" placeholder="Поиск по дефектам" value="${esc(state.q)}">
+      <label class="meta"><input type="checkbox" id="f-open" ${state.open?'checked':''}> только открытые</label>
+      <span class="meta">Показано: ${list.length} из ${D.findings.length}</span>
+    </div>
+    ${list.map(defectCard).join('') || '<p class="meta">Нет дефектов по выбранным фильтрам.</p>'}`;
+  document.querySelectorAll('[data-sev]').forEach(b => b.onclick = () => { const s=b.dataset.sev; state.sev.has(s)?state.sev.delete(s):state.sev.add(s); renderDefects(); });
+  $('f-crit').onchange = e => { state.crit = e.target.value; renderDefects(); };
+  $('f-q').oninput = e => { state.q = e.target.value.toLowerCase(); clearTimeout(window._t); window._t = setTimeout(() => { renderDefects(); $('f-q').focus(); const v=$('f-q').value; $('f-q').setSelectionRange(v.length,v.length); }, 250); };
+  $('f-open').onchange = e => { state.open = e.target.checked; renderDefects(); };
+  document.querySelectorAll('.quote').forEach(q => q.onclick = () => goLine(+q.dataset.line));
+}
+
+// ---------- document view
+function renderDoc(){
+  const marks = {};
+  for (const f of D.findings) { if (f.status === 'resolved') continue;
+    for (const e of f.evidence) { if (!e.line_start) continue;
+      for (let n = e.line_start; n <= (e.line_end || e.line_start); n++) {
+        const m = marks[n] || (marks[n] = {sev:'minor', ids:[]});
+        if (SEV_RANK[f.severity] < SEV_RANK[m.sev]) m.sev = f.severity;
+        if (!m.ids.includes(f.fid)) m.ids.push(f.fid);
+  }}}
+  const reqStart = {};
+  for (const r of D.requirements) if (r.evidence.line_start) (reqStart[r.evidence.line_start] ||= []).push(r.rid);
+  $('p-doc').innerHTML = `<p class="meta">Исходный документ построчно. Подсвечены строки, на которые ссылаются дефекты; нажмите на номер дефекта, чтобы открыть его.</p>
+   <div class="doc">${D.doc_lines.map(l => { const m = marks[l.no];
+     return `<div class="ln ${m ? 'h-' + m.sev : ''}" id="L${l.no}"><span class="n">${l.no}</span><span class="t">${esc(l.text)}</span><span class="m">${(reqStart[l.no]||[]).map(r => `<span class="pill">${r}</span>`).join('')}${m ? m.ids.map(id => `<a data-f="${id}">${id}</a>`).join('') : ''}</span></div>`; }).join('')}</div>`;
+  document.querySelectorAll('[data-f]').forEach(a => a.onclick = () => { openTab('defects'); state.sev = new Set(['critical','major','minor']); state.crit=''; state.q=''; state.open=false; renderDefects(); setTimeout(() => document.getElementById(a.dataset.f)?.scrollIntoView({behavior:'smooth', block:'center'}), 50); });
+}
+function goLine(n){ if (!n) return; openTab('doc'); const el = $('L' + n); if (!el) return;
+  el.scrollIntoView({behavior:'smooth', block:'center'}); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1600); }
+
+// ---------- requirements heatmap
+function renderReqs(){
+  const cols = Object.entries(D.criteria).filter(([c, v]) => D.findings.some(f => f.criterion === c));
+  const cell = (rid, c) => { const fs = D.findings.filter(f => f.status !== 'resolved' && f.criterion === c && f.requirement_ids.includes(rid));
+    if (!fs.length) return '<td></td>';
+    const worst = fs.map(f => f.severity).sort((a,b) => SEV_RANK[a]-SEV_RANK[b])[0];
+    return `<td class="c-${worst}" title="${esc(fs.map(f => f.fid + ' ' + f.title).join('\n'))}">${fs.length}</td>`; };
+  $('p-reqs').innerHTML = `
+    <h3>Тепловая карта: требование × критерий</h3><p class="meta">Цвет — наихудшая критичность, число — количество дефектов. Наведите курсор на ячейку, чтобы увидеть дефекты.</p>
+    <div class="scroll"><table class="heat"><thead><tr><th>Требование</th>${cols.map(([c, v]) => `<th class="v" title="${esc(v.source)}">${esc(v.name)}</th>`).join('')}</tr></thead>
+    <tbody>${D.requirements.map(r => `<tr><td style="text-align:left;white-space:nowrap"><b>${r.rid}</b> ${esc(r.source_id || '')}</td>${cols.map(([c]) => cell(r.rid, c)).join('')}</tr>`).join('')}</tbody></table></div>
+    <h3 style="margin-top:24px">Как агент нарезал требования</h3>
+    <div class="scroll"><table><thead><tr><th>ID</th><th>ID или место в документе</th><th>Тип</th><th>Краткая формулировка</th><th>Цитата</th><th>Место</th></tr></thead>
+    <tbody>${D.requirements.map(r => `<tr><td><b>${r.rid}</b></td><td>${esc(r.source_id || '— (нет номера)')}</td><td>${esc(D.kind_names[r.kind] || r.kind)}</td><td>${esc(r.summary)}</td><td><span class="quote" data-line="${r.evidence.line_start}">«${esc(r.evidence.quote)}»</span></td><td>${esc(r.evidence.location)}</td></tr>`).join('')}</tbody></table></div>
+    ${D.trace.length ? `<h3 style="margin-top:24px">Трассируемость</h3><div class="scroll"><table><thead><tr><th>Требование</th><th>Проверяется критериями приёмки</th><th>Реализуется</th><th>Замечание</th></tr></thead><tbody>
+      ${D.trace.map(t => `<tr><td><b>${t.requirement_id}</b> ${esc((reqById[t.requirement_id]||{}).source_id||'')}</td><td>${t.verified_by.join(', ') || '<span class="pill critical">нет</span>'}</td><td>${t.implemented_by.join(', ') || '—'}</td><td>${esc(t.note)}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+  document.querySelectorAll('#p-reqs .quote').forEach(q => q.onclick = () => goLine(+q.dataset.line));
+}
+
+// ---------- questions (форма ответов)
+function renderQuestions(){
+  $('p-questions').innerHTML = `
+    <div class="card"><b>Как ответить.</b> Выберите вариант или напишите свой ответ, затем нажмите «Скачать ответы». Передайте файл агенту:
+      <div style="margin-top:6px"><code>python -m revizor ${esc(p.file)} report.md --answers answers.json</code></div>
+      Агент перепроверит дефекты с учётом ответов и отметит закрытые.</div>
+    ${D.questions.map(q => `<article class="card ${q.blocking ? 'sev-critical' : ''}">
+      <h3>${esc(q.qid)} ${q.blocking ? '<span class="pill critical">блокирующий</span>' : ''}<span class="pill">${esc(q.addressee)}</span>
+        ${q.finding_ids.map(id => `<a class="pill" href="#${id}" data-go="${id}">${id}</a>`).join('')}</h3>
+      <div>${esc(q.question)}</div>
+      <div style="margin:8px 0">${q.options.map((o, i) => `<label class="opt"><input type="radio" name="${q.qid}" value="${esc(o)}" ${q.answer === o ? 'checked' : ''}> <span>${i + 1}. ${esc(o)}</span></label>`).join('')}</div>
+      <textarea rows="2" data-q="${q.qid}" placeholder="Свой ответ (необязательно)">${q.answer && !q.options.includes(q.answer) ? esc(q.answer) : ''}</textarea>
+      <div class="meta" style="margin-top:6px">Зачем: ${esc(q.why)}</div>
+    </article>`).join('') || '<p class="meta">Вопросов нет.</p>'}
+    ${D.questions.length ? `<div class="toolbar"><button class="btn" id="dl-answers">Скачать ответы (answers.json)</button></div>` : ''}`;
+  document.querySelectorAll('[data-go]').forEach(a => a.onclick = ev => { ev.preventDefault(); openTab('defects'); state.open=false; state.sev = new Set(['critical','major','minor']); renderDefects(); setTimeout(() => document.getElementById(a.dataset.go)?.scrollIntoView({behavior:'smooth', block:'center'}), 50); });
+  const btn = $('dl-answers');
+  if (btn) btn.onclick = () => {
+    const out = {};
+    for (const q of D.questions) {
+      const txt = document.querySelector(`textarea[data-q="${q.qid}"]`).value.trim();
+      const radio = document.querySelector(`input[name="${q.qid}"]:checked`);
+      const a = txt || (radio ? radio.value : '');
+      if (a) out[q.qid] = a;
+    }
+    const blob = new Blob([JSON.stringify(out, null, 2)], {type: 'application/json'});
+    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'answers.json'; link.click();
+  };
+}
+
+// ---------- checklist, tests, run
+function renderChecklist(){
+  $('p-checklist').innerHTML = D.checklist.length ? `<p class="meta">Чек-лист «Ревью требований» из шаблона документа, заполненный агентом.</p>
+    <div class="scroll"><table><thead><tr><th>Проверка</th><th>Ответ агента</th><th>Комментарий</th><th>Дефекты</th></tr></thead><tbody>
+    ${D.checklist.map(c => `<tr><td>${esc(c.item)}</td><td><span class="pill ${c.answer === 'Да' ? 'ok' : c.answer === 'Нет' ? 'critical' : ''}">${esc(c.answer)}</span></td><td>${esc(c.comment)}</td><td>${c.finding_ids.map(id => `<a href="#${id}" data-go2="${id}">${id}</a>`).join(', ') || '—'}</td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="meta">В документе нет чек-листа ревью.</p>';
+  document.querySelectorAll('[data-go2]').forEach(a => a.onclick = ev => { ev.preventDefault(); openTab('defects'); state.open=false; renderDefects(); setTimeout(() => document.getElementById(a.dataset.go2)?.scrollIntoView({behavior:'smooth', block:'center'}), 50); });
+}
+function renderTests(){
+  $('p-tests').innerHTML = D.tests.length ? `<p class="meta">Тест-кейсы, которых не хватает в критериях приёмки. Ожидаемый результат выведен из требований.</p>
+    <div class="scroll"><table><thead><tr><th>ID</th><th>Требования</th><th>Сценарий</th><th>Исходные условия</th><th>Действие</th><th>Ожидаемый результат</th><th>Что не покрыто</th></tr></thead><tbody>
+    ${D.tests.map(t => `<tr><td>${t.tid}</td><td>${t.requirement_ids.join(', ')}</td><td>${esc(t.title)}</td><td>${esc(t.preconditions)}</td><td>${esc(t.action)}</td><td>${esc(t.expected)}</td><td>${esc(t.gap)}</td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="meta">Тест-кейсов нет.</p>';
+}
+function renderRun(){
+  const calls = D.llm_calls, tin = calls.reduce((s,c)=>s+c.prompt_tokens,0), tout = calls.reduce((s,c)=>s+c.output_tokens+c.thoughts_tokens,0);
+  $('p-run').innerHTML = `
+    <div class="card"><h3>Конвейер агентов</h3>
+      <div class="flow"><span>Документ</span><i>→</i><span>Нарезчик</span><i>→</i><span>Правила (код)</span><i>→</i><span>Аналитик · Тестировщик · Архитектор · ИБ</span><i>→</i><span>Согласованность набора</span><i>→</i><span>Проверка цитат (код)</span><i>→</i><span>Судья</span><i>→</i><span>Уточнения</span><i>⇄</i><span>Человек → Перепроверка</span></div>
+      <div class="meta">Цитат проверено ${p.quotes_checked}, подтверждено ${p.quotes_verified}. Находок отброшено как неподтверждённые: ${D.unverified.length}. Отклонено судьёй: ${D.rejected.length}.</div></div>
+    <div class="scroll"><table><thead><tr><th>Шаг</th><th>Исполнитель</th><th>Время, с</th><th>Результат</th></tr></thead><tbody>
+      ${D.steps.map(s => `<tr><td>${esc(s.title)}</td><td>${esc(s.kind)}</td><td>${s.seconds}</td><td>${s.ok ? '' : '⚠️ '}${esc(s.note)}</td></tr>`).join('')}</tbody></table></div>
+    <h3 style="margin-top:24px">Вызовы модели</h3>
+    <div class="scroll"><table><thead><tr><th>Агент</th><th>Модель</th><th>Кэш</th><th>Время, с</th><th>Токены вход / выход</th></tr></thead><tbody>
+      ${calls.map(c => `<tr><td>${esc(D.agent_names[c.agent] || c.agent)}</td><td><code>${esc(c.model_version)}</code></td><td>${c.cached ? 'да' : 'нет'}</td><td>${c.seconds}</td><td>${c.prompt_tokens} / ${c.output_tokens + c.thoughts_tokens}</td></tr>`).join('')}
+      <tr><td colspan="4"><b>Итого</b></td><td><b>${tin} / ${tout}</b></td></tr></tbody></table></div>
+    <h3 style="margin-top:24px">Паспорт</h3>
+    <div class="scroll"><table><tbody>
+      <tr><th>Документ</th><td>${esc(p.document_title)}</td></tr><tr><th>Файл</th><td>${esc(p.file)} (${esc(p.format)})</td></tr>
+      <tr><th>SHA-256</th><td><code>${esc(p.sha256)}</code></td></tr><tr><th>Начало / конец</th><td>${esc(p.started_at)} — ${esc(p.finished_at)}</td></tr>
+      <tr><th>Модель</th><td>${esc(p.provider)} / ${esc(p.model)}; фактически: ${esc(p.model_versions.join(', '))}</td></tr>
+      <tr><th>Версия агента</th><td>${esc(p.agent_version)}</td></tr></tbody></table></div>`;
+}
+renderDefects(); renderDoc(); renderReqs(); renderQuestions(); renderChecklist(); renderTests(); renderRun();
+if (location.hash) { const el = document.querySelector(location.hash); if (el) el.scrollIntoView(); }
+</script>
+</body>
+</html>

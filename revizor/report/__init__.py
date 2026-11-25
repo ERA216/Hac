@@ -14,6 +14,7 @@ from ..llm import LLMClient
 from ..orchestrator import RunState
 from ..schemas import KIND_NAMES
 from ..version import agent_version
+from .html import AGENT_NAMES, render_html
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 
@@ -25,19 +26,6 @@ def _cell(value) -> str:
 
 def _quote(value: str) -> str:
     return (value or "").replace("\n", " ").strip()
-
-
-AGENT_NAMES = {
-    "segmenter": "Нарезчик",
-    "analyst": "Аналитик",
-    "qa": "Тестировщик",
-    "architect": "Архитектор",
-    "security": "ИБ и риски",
-    "consistency": "Согласованность набора",
-    "judge": "Судья",
-    "clarifier": "Уточнения",
-    "recheck": "Перепроверка",
-}
 
 
 def _who(value) -> str:
@@ -185,9 +173,17 @@ def to_json(state: RunState, llm: LLMClient) -> dict:
     }
 
 
+def render_html_report(state: RunState, llm: LLMClient) -> str:
+    return render_html(json.loads(json.dumps(to_json(state, llm), ensure_ascii=False, default=str)), state.doc)
+
+
 def write_reports(state: RunState, llm: LLMClient, report_path: Path) -> list[Path]:
+    """Отчёт .md (основной), .json (данные) и .html (интерактивный) рядом друг с другом."""
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_markdown(state, llm), encoding="utf-8")
+    data = to_json(state, llm)
     json_path = report_path.with_suffix(".json")
-    json_path.write_text(json.dumps(to_json(state, llm), ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    return [report_path, json_path]
+    json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    html_path = report_path.with_suffix(".html")
+    html_path.write_text(render_html(json.loads(json.dumps(data, ensure_ascii=False, default=str)), state.doc), encoding="utf-8")
+    return [report_path, html_path, json_path]

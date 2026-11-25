@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -253,6 +254,7 @@ class LLMClient:
         thinking_level: str | None = None,
         on_wait: Callable[[str], None] | None = None,
         fallback_models: list[str] | None = None,
+        extra_cache_dirs: list[Path] | None = None,
     ):
         self.provider = provider
         self.model = model
@@ -260,12 +262,14 @@ class LLMClient:
         self.fallback_models = [m for m in (fallback_models or []) if m and m != model]
         self.switches: list[str] = []
         self.cache_dir = cache_dir
+        self.extra_cache_dirs = [d for d in (extra_cache_dirs or []) if d and d != cache_dir]
         self.replay = replay
         self.min_interval = 60.0 / rpm if rpm else 0.0
         self.max_calls = max_calls
         self.on_wait = on_wait or (lambda msg: None)
         self.calls: list[CallRecord] = []
-        self._last_call = 0.0
+        self._last_call = -1e9
+        self._lock = threading.Lock()
         self._backend = None
         self._backend_args = (api_key, base_url, temperature, thinking_level)
 
@@ -299,8 +303,10 @@ class LLMClient:
     def generate(self, agent: str, system: str, user: str, schema: type[T]) -> T:
         key = self._cache_key(system, user, schema)
         path = self.cache_dir / f"{key}.json" if self.cache_dir else None
-        if path and path.exists():
-            data = json.loads(path.read_text(encoding="utf-8"))
+        # дополнительные каталоги кэша только для чтения (например, ответы финального прогона в репозитории)
+        found = next((p for p in [path, *(d / f"{key}.json" for d in self.extra_cache_dirs)] if p and p.exists()), None)
+        if found:
+            data = json.loads(found.read_text(encoding="utf-8"))
             try:
                 obj = schema.model_validate_json(extract_json(data["text"]))
                 self.calls.append(CallRecord(agent=agent, model=self.model, cached=True, seconds=0.0,
@@ -328,7 +334,10 @@ class LLMClient:
             )
             text, meta, more = self._call(system, repair, schema)
             attempts += more
-            obj = schema.model_validate_json(extract_json(text))
+            try:
+                obj = schema.model_validate_json(extract_json(text))
+            except ValidationError as err2:
+                raise LLMError(f"Ответ модели для агента «{agent}» не соответствует схеме: {str(err2)[:300]}") from err2
         record = CallRecord(
             agent=agent,
             model=self.backend.model,
@@ -350,20 +359,26 @@ class LLMClient:
         return obj
 
     def _throttle(self):
-        wait = self.min_interval - (time.monotonic() - self._last_call)
-        if wait > 0:
-            time.sleep(wait)
-        self._last_call = time.monotonic()
+        """Ограничение частоты, общее для всех потоков: каждый вызов получает свой слот времени."""
+        with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._last_call + self.min_interval)
+            self._last_call = slot
+        if slot > now:
+            time.sleep(slot - now)
 
-    def _switch_model(self, reason: str) -> bool:
+    def _switch_model(self, reason: str, failed_model: str) -> bool:
         """Переключиться на следующую резервную модель; False — резервы кончились."""
-        tried = {self.backend.model, *self.switches}
-        nxt = next((m for m in self.fallback_models if m not in tried), None)
-        if not nxt:
-            return False
-        self.on_wait(f"{self.backend.model}: {reason} — переключаюсь на {nxt}")
-        self.switches.append(self.backend.model)
-        self.backend.model = nxt
+        with self._lock:
+            if self.backend.model != failed_model:
+                return True  # другой поток уже переключил модель
+            tried = {self.backend.model, *self.switches}
+            nxt = next((m for m in self.fallback_models if m not in tried), None)
+            if not nxt:
+                return False
+            self.switches.append(self.backend.model)
+            self.backend.model = nxt
+        self.on_wait(f"{failed_model}: {reason} — переключаюсь на {nxt}")
         return True
 
     def _call(self, system: str, user: str, schema: type[BaseModel]) -> tuple[str, dict, int]:
@@ -373,6 +388,7 @@ class LLMClient:
         while True:
             attempts += 1
             self._throttle()
+            used_model = backend.model
             try:
                 text, meta = backend.complete(system, user, schema)
                 return text, meta, attempts
@@ -385,7 +401,7 @@ class LLMClient:
                         self.on_wait(f"{backend.model}: {reason}, повтор через {5 * overloaded} с")
                         time.sleep(5 * overloaded)
                         continue
-                    if self._switch_model(reason):
+                    if self._switch_model(reason, used_model):
                         overloaded = 0
                         continue
                     if reason == "исчерпана дневная квота":

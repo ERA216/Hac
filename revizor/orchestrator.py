@@ -8,7 +8,9 @@
 
 from __future__ import annotations
 
+import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Protocol
@@ -121,8 +123,12 @@ class Pipeline:
         ask_answers: AskAnswers | None = None,
         max_findings_per_agent: int = 15,
         max_questions: int = 10,
+        parallel: int = 4,
+        thread_initializer: Callable[[], None] | None = None,
     ):
         self.llm = llm
+        self.parallel = max(1, parallel)
+        self.thread_initializer = thread_initializer
         self.progress = progress or _Silent()
         self.ask_answers = ask_answers
         self.max_findings = max_findings_per_agent
@@ -252,21 +258,53 @@ class Pipeline:
         rule_findings = short_findings(state.candidates)
         reqs_text = requirements_table(state.requirements)
 
-        # 3. Ревьюеры
-        for lens in LENSES:
-            def review(lens=lens):
+        # 3. Ревьюеры: вызовы параллельно, обработка результатов — в фиксированном порядке,
+        #    чтобы идентификаторы кандидатов и промпты следующих агентов были детерминированы (кэш, --replay)
+        def call_lens(lens):
+            t0 = time.monotonic()
+            try:
                 out = ReviewerAgent(self.llm, lens).call(
                     **base_ctx, requirements=reqs_text, rule_findings=rule_findings, max_findings=self.max_findings
                 )
-                for f in out.findings:
-                    state.candidates.append(self._from_out(state, loc, f, lens.name))
-                for t in out.suggested_tests:
-                    state.tests.append(
-                        TestCase(tid=f"T-{len(state.tests) + 1:02d}", **t.model_dump())
-                    )
-                return f"{len(out.findings)} находок" + (f", {len(out.suggested_tests)} тест-кейсов" if out.suggested_tests else "")
+                return out, None, round(time.monotonic() - t0, 1)
+            except LLMError as e:
+                return None, e, round(time.monotonic() - t0, 1)
 
-            self._step(state, lens.title, "LLM", review)
+        for lens in LENSES:
+            self.progress.start(lens.title)
+        results: dict[str, tuple] = {}
+        if self.parallel > 1:
+            with ThreadPoolExecutor(max_workers=min(self.parallel, len(LENSES)), initializer=self.thread_initializer) as ex:
+                futures = {ex.submit(call_lens, lens): lens for lens in LENSES}
+                for fut in as_completed(futures):
+                    lens = futures[fut]
+                    results[lens.name] = fut.result()
+                    out, err, _ = results[lens.name]
+                    if err is None:
+                        self.progress.done(lens.title, f"{len(out.findings)} находок")
+                    else:
+                        self.progress.warn(f"{lens.title}: не выполнен: {err}")
+        else:
+            for lens in LENSES:
+                results[lens.name] = call_lens(lens)
+                out, err, _ = results[lens.name]
+                if err is None:
+                    self.progress.done(lens.title, f"{len(out.findings)} находок")
+                else:
+                    self.progress.warn(f"{lens.title}: не выполнен: {err}")
+        for lens in LENSES:
+            out, err, dt = results[lens.name]
+            if err is not None:
+                note = f"не выполнен: {err}"
+                state.errors.append(f"{lens.title}: {note}")
+                state.steps.append(StepRecord(title=lens.title, kind="LLM", seconds=dt, note=note, ok=False))
+                continue
+            for f in out.findings:
+                state.candidates.append(self._from_out(state, loc, f, lens.name))
+            for tc in out.suggested_tests:
+                state.tests.append(TestCase(tid=f"T-{len(state.tests) + 1:02d}", **tc.model_dump()))
+            note = f"{len(out.findings)} находок" + (f", {len(out.suggested_tests)} тест-кейсов" if out.suggested_tests else "")
+            state.steps.append(StepRecord(title=lens.title, kind="LLM", seconds=dt, note=note))
 
         # 4. Согласованность набора
         def consistency():
@@ -311,16 +349,42 @@ class Pipeline:
 
         # 8. Ответы человека и перепроверка
         if self.ask_answers and state.questions:
-            answers = self.ask_answers(state.questions)
-            for q in state.questions:
-                q.answer = answers.get(q.qid, "").strip()
-            answered = [q for q in state.questions if q.answer]
-            if answered:
-                state.steps.append(StepRecord("Ответы на уточняющие вопросы", "человек", 0.0, f"получено ответов: {len(answered)}"))
-                self._step(state, "Агент перепроверки", "LLM", lambda: self._recheck(state, loc, base_ctx, reqs_text, answered))
+            self.apply_answers(state, self.ask_answers(state.questions))
 
         state.finished_at = datetime.now(ALMATY)
         return state
+
+    def apply_answers(self, state: RunState, answers: dict[str, str]) -> str:
+        """Учесть ответы на уточняющие вопросы: агент перепроверки закрывает или меняет дефекты."""
+        for q in state.questions:
+            a = (answers.get(q.qid) or "").strip()
+            if a.isdigit() and 1 <= int(a) <= len(q.options):
+                a = q.options[int(a) - 1]
+            if a:
+                q.answer = a
+        answered = [q for q in state.questions if q.answer]
+        if not answered:
+            return "ответов нет"
+        doc = state.doc
+        loc = QuoteLocator(doc)
+        base_ctx = {"doc": doc, "numbered": doc.numbered()}
+        state.steps.append(StepRecord("Ответы на уточняющие вопросы", "человек", 0.0, f"получено ответов: {len(answered)}"))
+        self._step(state, "Агент перепроверки", "LLM",
+                   lambda: self._recheck(state, loc, base_ctx, requirements_table(state.requirements), answered))
+        state.finished_at = datetime.now(ALMATY)
+        return state.steps[-1].note
+
+    @staticmethod
+    def _fix_ids(text: str, cid_to_d: dict[str, str]) -> str:
+        """Заменить внутренние ID кандидатов (C-xxx) в текстах судьи на номера итоговых дефектов."""
+        t = re.sub(r"\bC-\d{3}\b", lambda m: cid_to_d.get(m.group(0), ""), text or "")
+        t = re.sub(r"\b(D-\d{2})(?:,\s*\1\b)+", r"\1", t)  # «D-01, D-01» → «D-01»
+        t = re.sub(r"\(\s*[,;]?\s*\)", "", t)  # пустые скобки от удалённых ID
+        t = re.sub(r"(?:,\s*){2,}", ", ", t)
+        t = re.sub(r"\(\s*,\s*", "(", t)
+        t = re.sub(r"\s*,\s*\)", ")", t)
+        t = re.sub(r"\s+([,.;:])", r"\1", t)
+        return re.sub(r"\s{2,}", " ", t).strip()
 
     def _judge(self, state: RunState, base_ctx: dict, reqs_text: str) -> str:
         out = JudgeAgent(self.llm).call(**base_ctx, requirements=reqs_text, candidates=full_findings(state.candidates))
@@ -382,6 +446,13 @@ class Pipeline:
             for row in out.checklist
         ]
         state.verdict = out.verdict
+        fix = lambda s: self._fix_ids(s, cid_to_d)  # noqa: E731
+        for f in state.findings:
+            f.title, f.problem = fix(f.title), fix(f.problem)
+            f.recommendation, f.rewrite = fix(f.recommendation), fix(f.rewrite)
+        for row in state.checklist:
+            row.comment = fix(row.comment)
+        state.verdict.summary = fix(state.verdict.summary)
         return (
             f"итог {len(state.findings)} дефектов из {len(state.candidates)} кандидатов; "
             f"отклонено {len(state.rejected)}" + (f"; добавлено пропущенных судьёй {len(orphans)}" if orphans else "")
