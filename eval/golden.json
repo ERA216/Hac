@@ -1,6 +1,6 @@
 {
   "document": "examples/requirements.md",
-  "sha256": "8c2b35d617f1629bef0871ec058658b51b2dc093b75eadb3cb59487f4e7da6b5",
+  "sha256": "e7dae55e5453a250d93e335f5ff9c7f775f4457ccddd333f4a67e47b20d74381",
   "note": "Эталонный список дефектов, размеченный вручную до запуска агента. Строки — по examples/requirements.md. Используется только для оценки качества, агенту не передаётся.",
   "items": [
     {

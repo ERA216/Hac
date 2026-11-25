@@ -103,8 +103,11 @@ def _build(path: Path, fmt: str, raw: bytes, chunks: list[tuple[int | None, str]
         first = next((ln.text for ln in lines if ln.text.strip()), path.stem)
         title = _clean_heading(first.lstrip("# "))[:120]
     pages = max((ln.page or 0 for ln in lines), default=0) or None
+    # для текстовых форматов хэш не зависит от переводов строк (CRLF в Windows, LF в git) —
+    # паспорт отчёта совпадает на любой ОС и с оригиналом в репозитории
+    digest_src = raw.replace(b"\r\n", b"\n") if fmt in ("md", "markdown", "txt") else raw
     return Document(
-        path=path, fmt=fmt, sha256=hashlib.sha256(raw).hexdigest(), title=title, lines=lines, pages=pages
+        path=path, fmt=fmt, sha256=hashlib.sha256(digest_src).hexdigest(), title=title, lines=lines, pages=pages
     )
 
 
