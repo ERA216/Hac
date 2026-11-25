@@ -23,7 +23,7 @@
 {% if f.rewrite %}
 - **Предлагаемая формулировка:** {{ f.rewrite }}
 {% endif %}
-- **Обнаружили:** {{ f.sources | join(", ") }}
+- **Обнаружили:** {{ f.sources | who }}
 {% endmacro %}
 # Отчёт о проверке требований: «{{ doc.title }}»
 
@@ -210,7 +210,7 @@
 | Агент | Модель | Кэш | Время, с | Токены вход / выход |
 | :--- | :--- | :--- | ---: | :--- |
 {% for c in calls %}
-| {{ c.agent }} | `{{ c.model_version }}` | {{ "да" if c.cached else "нет" }} | {{ c.seconds }} | {{ c.prompt_tokens }} / {{ c.output_tokens + c.thoughts_tokens }} |
+| {{ c.agent | who }} | `{{ c.model_version }}` | {{ "да" if c.cached else "нет" }} | {{ c.seconds }} | {{ c.prompt_tokens }} / {{ c.output_tokens + c.thoughts_tokens }} |
 {% endfor %}
 
 {% if state.rejected %}
@@ -219,7 +219,7 @@
 | Кандидат | Источник | Находка | Причина отклонения |
 | :--- | :--- | :--- | :--- |
 {% for r in state.rejected %}
-| {{ r.candidate_id }} | {{ r.source | cell }} | {{ r.title | cell }} | {{ r.reason | cell }} |
+| {{ r.candidate_id }} | {{ r.source.split(", ") | who | cell }} | {{ r.title | cell }} | {{ r.reason | cell }} |
 {% endfor %}
 {% endif %}
 
@@ -229,7 +229,7 @@
 Цитаты этих находок не найдены в документе, поэтому они не вошли в отчёт.
 
 {% for f in state.unverified %}
-- {{ f.title }} *({{ f.sources | join(", ") }})*: «{{ f.evidence[0].quote | q if f.evidence else "" }}»
+- {{ f.title }} *({{ f.sources | who }})*: «{{ f.evidence[0].quote | q if f.evidence else "" }}»
 {% endfor %}
 {% endif %}
 

@@ -27,6 +27,29 @@ def _quote(value: str) -> str:
     return (value or "").replace("\n", " ").strip()
 
 
+AGENT_NAMES = {
+    "segmenter": "Нарезчик",
+    "analyst": "Аналитик",
+    "qa": "Тестировщик",
+    "architect": "Архитектор",
+    "security": "ИБ и риски",
+    "consistency": "Согласованность набора",
+    "judge": "Судья",
+    "clarifier": "Уточнения",
+    "recheck": "Перепроверка",
+}
+
+
+def _who(value) -> str:
+    """Человекочитаемое имя агента/правила: «qa» → «Тестировщик», «правила:R-UNITS» → «Правило R-UNITS»."""
+    items = value if isinstance(value, list) else [value]
+    out = []
+    for s in items:
+        s = str(s)
+        out.append(f"Правило {s.split(':', 1)[1]}" if s.startswith("правила:") else AGENT_NAMES.get(s, s))
+    return ", ".join(out)
+
+
 def build_context(state: RunState, llm: LLMClient) -> dict:
     doc = state.doc
     reqs = {r.rid: r for r in state.requirements}
@@ -115,6 +138,7 @@ def render_markdown(state: RunState, llm: LLMClient) -> str:
     )
     env.filters["cell"] = _cell
     env.filters["q"] = _quote
+    env.filters["who"] = _who
     text = env.get_template("report.md.j2").render(**build_context(state, llm))
     # не более одной пустой строки подряд
     out, blank = [], 0
