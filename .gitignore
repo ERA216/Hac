@@ -21,3 +21,4 @@ Thumbs.db
 # Локальные настройки IDE/агента
 .claude/
 reports/run.log
+pitch/
