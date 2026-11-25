@@ -27,8 +27,9 @@ def finding_lines(f: dict) -> set[int]:
 
 
 def finding_text(f: dict) -> str:
+    # только формулировка дефекта, без цитат: иначе ключевое слово находится в самой цитате документа
+    # и дефект «засчитывается» случайно
     parts = [f.get("title", ""), f.get("problem", ""), f.get("recommendation", ""), f.get("rewrite", "")]
-    parts += [e.get("quote", "") for e in f.get("evidence", [])]
     return " ".join(parts)
 
 

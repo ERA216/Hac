@@ -29,6 +29,7 @@ from .criteria import CRITERIA
 from .document import Document
 from .llm import BudgetExceeded, CacheMiss, LLMClient, LLMError, QuotaExhausted
 from .rules import run_rules
+from .segmentation import chunk_ranges, numbered_range, rule_segments
 from .schemas import (
     ChecklistRow,
     Evidence,
@@ -125,8 +126,10 @@ class Pipeline:
         max_questions: int = 10,
         parallel: int = 4,
         thread_initializer: Callable[[], None] | None = None,
+        segment_chunk_chars: int = 24000,
     ):
         self.llm = llm
+        self.segment_chunk_chars = segment_chunk_chars
         self.parallel = max(1, parallel)
         self.thread_initializer = thread_initializer
         self.progress = progress or _Silent()
@@ -209,9 +212,24 @@ class Pipeline:
 
         # 1. Нарезка
         def segment():
-            out = SegmenterAgent(self.llm).call(**base_ctx)
+            # длинный документ режем на части по заголовкам; если LLM недоступна — нарезка по структуре
+            chunks = chunk_ranges(doc, self.segment_chunk_chars)
+            items, by_rules = [], []
+            for n, (a, b) in enumerate(chunks, start=1):
+                ctx = dict(base_ctx)
+                if len(chunks) > 1:
+                    ctx["numbered"] = numbered_range(doc, a, b)
+                    ctx["part"] = f"часть {n} из {len(chunks)} (строки {a}–{b}); выдели требования только из этой части"
+                try:
+                    items.extend(SegmenterAgent(self.llm).call(**ctx).requirements)
+                except LLMError as e:
+                    by_rules.append(f"{a}–{b}")
+                    items.extend(rule_segments(doc, (a, b)))
+                    state.errors.append(
+                        f"Нарезка требований (строки {a}–{b}): LLM недоступна ({e}); использована нарезка по структуре документа"
+                    )
             unverified = 0
-            for i, r in enumerate(out.requirements, start=1):
+            for i, r in enumerate(items, start=1):
                 ev = loc.locate(r.quote, r.line_start)
                 if not ev.verified:
                     unverified += 1
@@ -231,6 +249,10 @@ class Pipeline:
                     )
                 )
             note = f"{len(state.requirements)} требований"
+            if len(chunks) > 1:
+                note += f", документ обработан частями: {len(chunks)}"
+            if by_rules:
+                note += f"; по структуре (без LLM) нарезаны строки {', '.join(by_rules)}"
             return note + (f", {unverified} цитат восстановлено по номерам строк" if unverified else "")
 
         self._step(state, "Нарезка требований", "LLM", segment, required=True)

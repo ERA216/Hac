@@ -18,5 +18,5 @@
 - summary — суть в 5–15 словах.
 - Порядок — как в документе. Ничего не пропускай.
 
-Документ «{{ doc.title }}»:
+Документ «{{ doc.title }}»{% if part is defined %} — {{ part }}{% endif %}:
 {{ numbered }}

@@ -312,10 +312,129 @@ def check_api_tables(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     return hits
 
 
+# --- шаблон ТЗ финтех-проекта (основная часть и дочерняя спецификация REST API)
+TEMPLATE_MAIN = [
+    ("общие сведения", "minor"), ("цели", "major"), ("архитектура решения", "minor"),
+    ("дизайн процесса ui", "minor"), ("требования к изменениям", "minor"), ("bpmn", "minor"),
+    ("функциональные требования", "critical"), ("sequence", "minor"), ("нефункциональные требования", "major"),
+    ("требования к данным", "major"), ("требования к интеграции", "major"), ("требования к тестированию", "minor"),
+    ("критерии приемки", "major"), ("ревью требований", "minor"), ("блок согласующих", "minor"),
+]
+TEMPLATE_API = [
+    ("общие параметры", "minor"), ("логика работы метода", "major"), ("параметры запроса", "major"),
+    ("ответ", "major"), ("статусы", "major"),
+]
+
+
+def _norm_heading(t: str) -> str:
+    t = re.sub(r"^#{1,6}\s*", "", t)
+    return re.sub(r"[*_`]", "", t).lower().replace("ё", "е").strip()
+
+
+def check_template_sections(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    """Если документ оформлен по шаблону ТЗ, проверяем, что обязательные разделы на месте."""
+    # заголовком считаем и строку, целиком выделенную жирным (PDF/DOCX часто теряют уровни заголовков)
+    heads = [
+        (ln.no, _norm_heading(ln.text)) for ln in doc.lines
+        if re.match(r"^#{1,6}\s", ln.text) or re.fullmatch(r"\*\*[^*|]{3,80}\*\*", ln.text.strip())
+    ]
+    if not heads:
+        return []
+
+    def present(key: str) -> bool:
+        return any(key in h or (len(h) > 4 and h in key) for _, h in heads)
+
+    hits = []
+    for name, template, min_found in (("основной части ТЗ", TEMPLATE_MAIN, 6), ("спецификации API", TEMPLATE_API, 3)):
+        found = [k for k, _ in template if present(k)]
+        if len(found) < min_found:
+            continue  # документ не по этому шаблону — не навязываем структуру
+        missing = [(k, sev) for k, sev in template if k not in found]
+        if not missing:
+            continue
+        worst = min((sev for _, sev in missing), key=lambda s: {"critical": 0, "major": 1, "minor": 2}[s])
+        anchor = heads[0][0] if name == "основной части ТЗ" else next(
+            (no for no, h in heads if any(k in h for k, _ in template)), heads[0][0])
+        names = ", ".join(f"«{k}»" for k, _ in missing)
+        hits.append(
+            RuleHit(
+                rule="R-TEMPLATE", criterion="set_complete", severity=worst,
+                title=f"В {name} нет обязательных разделов шаблона: {names}",
+                problem=(
+                    f"Документ оформлен по шаблону ТЗ (найдено разделов шаблона: {len(found)} из {len(template)}), "
+                    f"но разделы {names} отсутствуют. Требования, которые должны в них находиться, не заданы — "
+                    "их нельзя реализовать и проверить."
+                ),
+                recommendation="Добавить недостающие разделы и заполнить их или явно указать «не применимо» с обоснованием.",
+                evidence=[loc.line_evidence(anchor)],
+            )
+        )
+    return hits
+
+
+_REQ_ID = re.compile(r"(?<![\w-])([A-ZА-ЯЁ]{1,6})[-‑–](\d{1,3})(?![\w-])")
+_DEF_ID = re.compile(r"^\s*(?:[-*]\s+|\d+[.)]\s+)?\**\s*([A-ZА-ЯЁ]{1,6})[-‑–](\d{1,3})\.?\**(?=[\s.:)]|$)")
+
+
+def check_requirement_ids(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    """Нумерация требований: дубли, пропуски, ссылки на несуществующие требования."""
+    defined: dict[str, dict[int, list[int]]] = defaultdict(lambda: defaultdict(list))
+    for ln in doc.lines:
+        t = ln.text.strip()
+        if t.startswith("|"):
+            cells = _cells(t)
+            m = _DEF_ID.match(cells[0]) if cells else None
+        else:
+            m = _DEF_ID.match(t)
+        if m:
+            defined[m.group(1)][int(m.group(2))].append(ln.no)
+    hits = []
+    for prefix, nums in defined.items():
+        if len(nums) < 2:
+            continue  # одиночный «ID» — скорее всего не система нумерации
+        for n, lines in sorted(nums.items()):
+            if len(lines) > 1:
+                hits.append(RuleHit(
+                    rule="R-ID-DUP", criterion="traceable", severity="major",
+                    title=f"Идентификатор {prefix}-{n} используется несколько раз",
+                    problem=f"Требование {prefix}-{n} определено в {len(lines)} местах: ссылки на него неоднозначны, трассировка ломается.",
+                    recommendation="Присвоить требованиям уникальные идентификаторы.",
+                    evidence=[loc.line_evidence(x) for x in lines[:3]],
+                ))
+        present = sorted(nums)
+        gaps = [n for n in range(present[0], present[-1] + 1) if n not in nums]
+        if gaps:
+            after = max(n for n in present if n < gaps[0])
+            hits.append(RuleHit(
+                rule="R-ID-GAP", criterion="traceable", severity="minor",
+                title=f"Пропуск в нумерации требований: нет {', '.join(f'{prefix}-{g}' for g in gaps)}",
+                problem=(
+                    f"Требования {prefix} пронумерованы с пропуском ({', '.join(f'{prefix}-{g}' for g in gaps)}). "
+                    "Возможно, требование удалено или потеряно при редактировании; ссылки на него в смежных документах станут висячими."
+                ),
+                recommendation="Восстановить пропущенное требование или явно пометить номер как исключённый.",
+                evidence=[loc.line_evidence(nums[after][0])],
+            ))
+        # ссылки на несуществующие требования того же префикса
+        for ln in doc.lines:
+            for m in _REQ_ID.finditer(ln.text):
+                if m.group(1) == prefix and int(m.group(2)) not in nums:
+                    hits.append(RuleHit(
+                        rule="R-ID-REF", criterion="traceable", severity="major",
+                        title=f"Ссылка на несуществующее требование {m.group(0)}",
+                        problem=f"В тексте упоминается {m.group(0)}, но требование с таким идентификатором в документе не определено.",
+                        recommendation="Исправить ссылку или добавить требование.",
+                        evidence=[loc.line_evidence(ln.no)],
+                    ))
+    return hits
+
+
 ALL_RULES = [
     check_language,
     check_placeholders,
     check_empty_sections,
+    check_template_sections,
+    check_requirement_ids,
     check_money_units,
     check_http,
     check_status_codes,

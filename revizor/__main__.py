@@ -152,6 +152,15 @@ def main(argv: list[str] | None = None) -> int:
         on_wait=lambda msg: console.print(f"[dim]… {msg}[/]"),
     )
 
+    key = os.getenv("GEMINI_API_KEY", "") if llm.provider == "gemini" else "ok"
+    if not args.replay and (not key or key.startswith("your_")):
+        console.print(
+            "[red]Не задан ключ GEMINI_API_KEY.[/] Скопируйте .env.example в .env и впишите ключ "
+            "(см. README, раздел «Ключ LLM»).\nБез ключа можно воспроизвести сохранённый прогон: "
+            "[bold]python -m revizor examples/requirements.md reports/replay.md --replay[/]"
+        )
+        return 2
+
     try:
         doc = load_document(args.input)
     except (FileNotFoundError, ValueError) as e:
