@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Protocol
+from typing import Protocol
 
 from .agents import (
     LENSES,
@@ -29,7 +30,6 @@ from .criteria import CRITERIA
 from .document import Document
 from .llm import BudgetExceeded, CacheMiss, FatalLLMError, LLMClient, LLMError, QuotaExhausted
 from .rules import run_rules
-from .segmentation import chunk_ranges, numbered_range, rule_segments
 from .schemas import (
     ChecklistRow,
     Evidence,
@@ -42,6 +42,7 @@ from .schemas import (
     TraceLinkOut,
     VerdictOut,
 )
+from .segmentation import chunk_ranges, numbered_range, rule_segments
 from .verify import QuoteLocator, clean_line, dedupe_evidence
 
 ALMATY = timezone(timedelta(hours=5), "Алматы")
@@ -114,7 +115,11 @@ class RunState:
 
     @property
     def ready_for_testing(self) -> bool:
-        blocking = [f for f in self.open_findings if f.severity == "critical" and f.criterion in ("verifiable", "consistent", "validatable")]
+        blocking = [
+            f
+            for f in self.open_findings
+            if f.severity == "critical" and f.criterion in ("verifiable", "consistent", "validatable")
+        ]
         llm_ok = self.verdict.ready_for_testing if self.verdict else True
         return llm_ok and not blocking
 
@@ -348,7 +353,9 @@ class Pipeline:
         # 4. Согласованность набора
         def consistency():
             out = ConsistencyAgent(self.llm).call(
-                **base_ctx, requirements=reqs_text, known_findings=short_findings(state.candidates),
+                **base_ctx,
+                requirements=reqs_text,
+                known_findings=short_findings(state.candidates),
                 max_findings=self.max_findings,
             )
             for f in out.findings:
@@ -408,8 +415,12 @@ class Pipeline:
         loc = QuoteLocator(doc)
         base_ctx = {"doc": doc, "numbered": doc.numbered()}
         state.steps.append(StepRecord("Ответы на уточняющие вопросы", "человек", 0.0, f"получено ответов: {len(answered)}"))
-        self._step(state, "Агент перепроверки", "LLM",
-                   lambda: self._recheck(state, loc, base_ctx, requirements_table(state.requirements), answered))
+        self._step(
+            state,
+            "Агент перепроверки",
+            "LLM",
+            lambda: self._recheck(state, loc, base_ctx, requirements_table(state.requirements), answered),
+        )
         state.finished_at = datetime.now(ALMATY)
         return state.steps[-1].note
 
@@ -479,7 +490,9 @@ class Pipeline:
         cid_to_d = self._number_findings(state, {})
         state.checklist = [
             ChecklistRow(
-                item=row.item, answer=row.answer, comment=row.comment,
+                item=row.item,
+                answer=row.answer,
+                comment=row.comment,
                 finding_ids=sorted({cid_to_d[c] for c in row.candidate_ids if c in cid_to_d}),
             )
             for row in out.checklist
@@ -492,9 +505,8 @@ class Pipeline:
         for row in state.checklist:
             row.comment = fix(row.comment)
         state.verdict.summary = fix(state.verdict.summary)
-        return (
-            f"итог {len(state.findings)} дефектов из {len(state.candidates)} кандидатов; "
-            f"отклонено {len(state.rejected)}" + (f"; добавлено пропущенных судьёй {len(orphans)}" if orphans else "")
+        return f"итог {len(state.findings)} дефектов из {len(state.candidates)} кандидатов; отклонено {len(state.rejected)}" + (
+            f"; добавлено пропущенных судьёй {len(orphans)}" if orphans else ""
         )
 
     def _number_findings(self, state: RunState, _) -> dict[str, str]:
@@ -517,7 +529,9 @@ class Pipeline:
         if not state.findings:
             return "дефектов нет — вопросов нет"
         out = ClarifierAgent(self.llm).call(
-            **base_ctx, requirements=reqs_text, findings=full_findings(state.open_findings),
+            **base_ctx,
+            requirements=reqs_text,
+            findings=full_findings(state.open_findings),
             max_questions=self.max_questions,
         )
         known_f = {f.fid for f in state.findings}

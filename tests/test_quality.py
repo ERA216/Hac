@@ -57,8 +57,12 @@ def test_plain_text_numbered_headings(tmp_path):
 
 def test_docx_bold_paragraphs_become_headings(tmp_path):
     d = docx.Document()
-    for text, bold in [("Функциональные требования", True), ("ФТ-1. Клиент задаёт лимит.", False),
-                       ("Нефункциональные требования", True), ("Ответ за 300 мс.", False)]:
+    for text, bold in [
+        ("Функциональные требования", True),
+        ("ФТ-1. Клиент задаёт лимит.", False),
+        ("Нефункциональные требования", True),
+        ("Ответ за 300 мс.", False),
+    ]:
         d.add_paragraph().add_run(text).bold = bold
     t = d.add_table(rows=2, cols=2)
     t.cell(0, 0).text, t.cell(0, 1).text = "Parameter", "Format"
@@ -91,9 +95,12 @@ class _ContradictingRecheck(FakeLLM):
     def generate(self, agent, system, user, schema):
         if agent == "recheck":
             self.calls.append(self.calls[-1])
-            return RecheckOut(statuses=[
-                {"finding_id": "D-01", "status": "resolved", "comment": "Ответ не уточняет поведение при смене порога."},
-            ], new_findings=[])
+            return RecheckOut(
+                statuses=[
+                    {"finding_id": "D-01", "status": "resolved", "comment": "Ответ не уточняет поведение при смене порога."},
+                ],
+                new_findings=[],
+            )
         return super().generate(agent, system, user, schema)
 
 

@@ -96,7 +96,7 @@ def rule_segments(doc: Document, line_range: tuple[int, int] | None = None) -> l
         else:
             source_id = ""
         if m_id and not m_status:
-            body = quote[len(source_id):].lstrip(" .")
+            body = quote[len(source_id) :].lstrip(" .")
         elif m_num or m_status:
             body = re.sub(r"^\d{1,3}[.)]\s*", "", quote)
         else:
@@ -105,8 +105,13 @@ def rule_segments(doc: Document, line_range: tuple[int, int] | None = None) -> l
         summary = " ".join(words[:12]) + ("…" if len(words) > 12 else "")
         out.append(
             RequirementOut(
-                source_id=source_id, section=ln.section, kind=_kind(ln.section),
-                summary=summary, quote=quote, line_start=no, line_end=no,
+                source_id=source_id,
+                section=ln.section,
+                kind=_kind(ln.section),
+                summary=summary,
+                quote=quote,
+                line_start=no,
+                line_end=no,
             )
         )
     return out

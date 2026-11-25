@@ -86,7 +86,8 @@ if doc_path:
 def make_pipeline(llm, box) -> Pipeline:
     ctx = get_script_run_ctx()  # потоки параллельных ревьюеров должны писать в тот же интерфейс
     return Pipeline(
-        llm, progress=StatusProgress(box),
+        llm,
+        progress=StatusProgress(box),
         thread_initializer=lambda: add_script_run_ctx(threading.current_thread(), ctx),
     )
 
@@ -121,7 +122,9 @@ if st.button("Проверить документ", type="primary", disabled=not
     with st.status("Агенты анализируют документ…", expanded=True) as box:
         try:
             doc = load_document(doc_path)
-            box.write(f"📄 Загружен документ «{doc.title}»: {len(doc.lines)} строк" + (f", {doc.pages} стр." if doc.pages else ""))
+            box.write(
+                f"📄 Загружен документ «{doc.title}»: {len(doc.lines)} строк" + (f", {doc.pages} стр." if doc.pages else "")
+            )
             llm = make_llm(box)
             state = make_pipeline(llm, box).run(doc)
             st.session_state["run"] = (state, llm)
@@ -136,7 +139,9 @@ if run:
     state, llm = run
     c = st.columns(3)
     c[0].metric("Требований", len(state.requirements))
-    c[1].metric("Уточняющих вопросов", len(state.questions), f"блокирующих: {sum(q.blocking for q in state.questions)}", delta_color="off")
+    c[1].metric(
+        "Уточняющих вопросов", len(state.questions), f"блокирующих: {sum(q.blocking for q in state.questions)}", delta_color="off"
+    )
     c[2].metric("Цитат подтверждено", f"{state.quotes_verified}/{state.quotes_checked}")
     c = st.columns(3)
     c[0].metric("🔴 Критичных", state.count("critical"))
@@ -160,7 +165,10 @@ if run:
             with st.form("answers"):
                 answers = {}
                 for q in state.questions:
-                    st.markdown(f"**{q.qid}** {'⛔ блокирующий · ' if q.blocking else ''}*{q.addressee}* · дефекты: {', '.join(q.finding_ids) or '—'}")
+                    st.markdown(
+                        f"**{q.qid}** {'⛔ блокирующий · ' if q.blocking else ''}*{q.addressee}* · "
+                        f"дефекты: {', '.join(q.finding_ids) or '—'}"
+                    )
                     st.write(q.question)
                     choice = st.radio("Вариант", ["— пропустить —", *q.options], key=f"r_{q.qid}", label_visibility="collapsed")
                     own = st.text_input("Свой ответ", key=f"t_{q.qid}", placeholder="или свой ответ")
@@ -192,8 +200,12 @@ if run:
     with tab_dl:
         stem = Path(state.doc.path).stem
         st.download_button("Отчёт Markdown", render_markdown(state, llm), file_name=f"{stem}_report.md", mime="text/markdown")
-        st.download_button("Отчёт HTML (интерактивный)", render_html_report(state, llm), file_name=f"{stem}_report.html", mime="text/html")
         st.download_button(
-            "Данные JSON", json.dumps(to_json(state, llm), ensure_ascii=False, indent=2, default=str),
-            file_name=f"{stem}_report.json", mime="application/json",
+            "Отчёт HTML (интерактивный)", render_html_report(state, llm), file_name=f"{stem}_report.html", mime="text/html"
+        )
+        st.download_button(
+            "Данные JSON",
+            json.dumps(to_json(state, llm), ensure_ascii=False, indent=2, default=str),
+            file_name=f"{stem}_report.json",
+            mime="application/json",
         )

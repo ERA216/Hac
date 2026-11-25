@@ -57,8 +57,10 @@ def score(report: dict, golden: dict) -> dict:
     return {
         "recall_core": sum(r["found"] for r in core) / max(1, len(core)),
         "recall_all": sum(r["found"] for r in rows) / max(1, len(rows)),
-        "core_found": sum(r["found"] for r in core), "core_total": len(core),
-        "all_found": sum(r["found"] for r in rows), "all_total": len(rows),
+        "core_found": sum(r["found"] for r in core),
+        "core_total": len(core),
+        "all_found": sum(r["found"] for r in rows),
+        "all_total": len(rows),
         "rows": rows,
         "extra": [{"fid": f["fid"], "title": f["title"], "severity": f["severity"]} for f in extra],
         "findings_total": len(verified),
@@ -83,7 +85,9 @@ def to_markdown(res: dict, report: dict) -> str:
         "| :--- | :---: | :--- | :---: | :--- |",
     ]
     for r in res["rows"]:
-        out.append(f"| {r['id']} | {'да' if r['core'] else ''} | {r['name']} | {'✅' if r['found'] else '❌'} | {', '.join(r['by'])} |")
+        out.append(
+            f"| {r['id']} | {'да' if r['core'] else ''} | {r['name']} | {'✅' if r['found'] else '❌'} | {', '.join(r['by'])} |"
+        )
     if res["extra"]:
         out += ["", "**Дефекты отчёта вне эталона** (требуют ручной оценки — часть из них дополнительные верные находки):", ""]
         out += [f"- {e['fid']} ({e['severity']}): {e['title']}" for e in res["extra"]]

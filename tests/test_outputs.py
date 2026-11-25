@@ -42,11 +42,27 @@ class _FakeOllama(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         _FakeOllama.received = body
-        answer = {"questions": [{"addressee": "Аналитик", "question": "Что считать минутой?", "why": "спор",
-                                 "options": ["от события", "от покупки"], "finding_ids": [], "requirement_ids": [],
-                                 "blocking": False}]}
-        payload = json.dumps({"model": body["model"], "message": {"content": json.dumps(answer, ensure_ascii=False)},
-                              "prompt_eval_count": 42, "eval_count": 7}).encode("utf-8")
+        answer = {
+            "questions": [
+                {
+                    "addressee": "Аналитик",
+                    "question": "Что считать минутой?",
+                    "why": "спор",
+                    "options": ["от события", "от покупки"],
+                    "finding_ids": [],
+                    "requirement_ids": [],
+                    "blocking": False,
+                }
+            ]
+        }
+        payload = json.dumps(
+            {
+                "model": body["model"],
+                "message": {"content": json.dumps(answer, ensure_ascii=False)},
+                "prompt_eval_count": 42,
+                "eval_count": 7,
+            }
+        ).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -61,8 +77,9 @@ def test_ollama_provider_native_api():
     server = HTTPServer(("127.0.0.1", 0), _FakeOllama)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        llm = LLMClient("ollama", "qwen3:4b", base_url=f"http://127.0.0.1:{server.server_port}/v1",
-                        cache_dir=None, rpm=0, num_ctx=16384)
+        llm = LLMClient(
+            "ollama", "qwen3:4b", base_url=f"http://127.0.0.1:{server.server_port}/v1", cache_dir=None, rpm=0, num_ctx=16384
+        )
         out = llm.generate("clarifier", "system", "user", ClarifyOut)
     finally:
         server.shutdown()

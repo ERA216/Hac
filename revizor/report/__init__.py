@@ -75,8 +75,14 @@ def build_context(state: RunState, llm: LLMClient) -> dict:
         if c.level != "set":
             continue
         fs = [f for f in findings if f.criterion == code and f.is_open]
-        set_criteria.append({"c": c, "fids": [f.fid for f in fs], "ok": not fs,
-                             "worst": min((f.severity for f in fs), key=lambda s: {"critical": 0, "major": 1, "minor": 2}[s], default="")})
+        set_criteria.append(
+            {
+                "c": c,
+                "fids": [f.fid for f in fs],
+                "ok": not fs,
+                "worst": min((f.severity for f in fs), key=lambda s: {"critical": 0, "major": 1, "minor": 2}[s], default=""),
+            }
+        )
 
     by_criterion = Counter(f.criterion for f in state.open_findings)
     clean_reqs = sum(1 for row in req_rows if row["status"].startswith("✅"))
@@ -103,8 +109,11 @@ def build_context(state: RunState, llm: LLMClient) -> dict:
         "rewrites": [
             {
                 "f": f,
-                "req": ", ".join(f"{rid} ({reqs[rid].source_id})" if reqs[rid].source_id else rid for rid in f.requirement_ids) or "—",
-                "was": reqs[f.requirement_ids[0]].evidence.quote if f.requirement_ids else (f.evidence[0].quote if f.evidence else ""),
+                "req": ", ".join(f"{rid} ({reqs[rid].source_id})" if reqs[rid].source_id else rid for rid in f.requirement_ids)
+                or "—",
+                "was": reqs[f.requirement_ids[0]].evidence.quote
+                if f.requirement_ids
+                else (f.evidence[0].quote if f.evidence else ""),
             }
             for f in state.open_findings
             if f.rewrite
@@ -130,8 +139,11 @@ def build_context(state: RunState, llm: LLMClient) -> dict:
 
 def render_markdown(state: RunState, llm: LLMClient) -> str:
     env = Environment(
-        loader=FileSystemLoader(TEMPLATES), autoescape=False, undefined=StrictUndefined,
-        trim_blocks=True, lstrip_blocks=True,
+        loader=FileSystemLoader(TEMPLATES),
+        autoescape=False,
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
     )
     env.filters["cell"] = _cell
     env.filters["q"] = _quote
@@ -170,6 +182,9 @@ def to_json(state: RunState, llm: LLMClient) -> dict:
         },
         "requirements": [r.model_dump() for r in state.requirements],
         "findings": [f.model_dump() for f in state.findings],
+        # все находки агентов и правил до судьи (с подтверждёнными цитатами): видно, что судья объединил
+        # (поле candidate_ids у итоговых дефектов) и что отклонил (rejected)
+        "candidates": [c.model_dump() for c in state.candidates],
         "questions": [q.model_dump() for q in state.questions],
         "tests": [t.model_dump() for t in state.tests],
         "trace": [t.model_dump() for t in state.trace],
@@ -206,21 +221,57 @@ def write_csv(state: RunState, report_path: Path) -> list[Path]:
     defects_path = report_path.with_name(report_path.stem + ".defects.csv")
     with defects_path.open("w", encoding="utf-8-sig", newline="") as fh:
         w = csv.writer(fh, delimiter=";")
-        w.writerow(["ID", "Критичность", "Приоритет Jira", "Критерий", "Источник критерия", "Требования",
-                    "Заголовок", "Проблема", "Что исправить", "Предлагаемая формулировка", "Где в документе", "Цитаты", "Статус"])
+        w.writerow(
+            [
+                "ID",
+                "Критичность",
+                "Приоритет Jira",
+                "Критерий",
+                "Источник критерия",
+                "Требования",
+                "Заголовок",
+                "Проблема",
+                "Что исправить",
+                "Предлагаемая формулировка",
+                "Где в документе",
+                "Цитаты",
+                "Статус",
+            ]
+        )
         for f in state.findings:
-            w.writerow([
-                f.fid, SEVERITY_NAMES.get(f.severity, f.severity), priority.get(f.severity, ""), criterion_name(f.criterion),
-                CRITERIA[f.criterion].source if f.criterion in CRITERIA else "", ", ".join(f.requirement_ids), f.title,
-                f.problem, f.recommendation, f.rewrite, "; ".join(e.location for e in f.evidence),
-                " | ".join(e.quote for e in f.evidence), {"open": "открыт", "resolved": "закрыт уточнением", "changed": "изменён"}[f.status],
-            ])
+            w.writerow(
+                [
+                    f.fid,
+                    SEVERITY_NAMES.get(f.severity, f.severity),
+                    priority.get(f.severity, ""),
+                    criterion_name(f.criterion),
+                    CRITERIA[f.criterion].source if f.criterion in CRITERIA else "",
+                    ", ".join(f.requirement_ids),
+                    f.title,
+                    f.problem,
+                    f.recommendation,
+                    f.rewrite,
+                    "; ".join(e.location for e in f.evidence),
+                    " | ".join(e.quote for e in f.evidence),
+                    {"open": "открыт", "resolved": "закрыт уточнением", "changed": "изменён"}[f.status],
+                ]
+            )
     questions_path = report_path.with_name(report_path.stem + ".questions.csv")
     with questions_path.open("w", encoding="utf-8-sig", newline="") as fh:
         w = csv.writer(fh, delimiter=";")
         w.writerow(["ID", "Блокирующий", "Кому", "Вопрос", "Варианты ответа", "Зачем", "Дефекты", "Требования", "Ответ"])
         for q in state.questions:
-            w.writerow([q.qid, "да" if q.blocking else "нет", q.addressee, q.question,
-                        " / ".join(f"{i}. {o}" for i, o in enumerate(q.options, 1)), q.why,
-                        ", ".join(q.finding_ids), ", ".join(q.requirement_ids), q.answer])
+            w.writerow(
+                [
+                    q.qid,
+                    "да" if q.blocking else "нет",
+                    q.addressee,
+                    q.question,
+                    " / ".join(f"{i}. {o}" for i, o in enumerate(q.options, 1)),
+                    q.why,
+                    ", ".join(q.finding_ids),
+                    ", ".join(q.requirement_ids),
+                    q.answer,
+                ]
+            )
     return [defects_path, questions_path]

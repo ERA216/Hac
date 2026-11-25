@@ -69,9 +69,14 @@ class ConsoleProgress:
 
 def _ask_in_console(console: Console):
     def ask(questions: list[Question]) -> dict[str, str]:
-        console.print(Panel.fit(
-            "Агент подготовил уточняющие вопросы. Выберите вариант цифрой, введите свой ответ "
-            "или нажмите Enter, чтобы пропустить.", title="Уточнения", border_style="cyan"))
+        console.print(
+            Panel.fit(
+                "Агент подготовил уточняющие вопросы. Выберите вариант цифрой, введите свой ответ "
+                "или нажмите Enter, чтобы пропустить.",
+                title="Уточнения",
+                border_style="cyan",
+            )
+        )
         answers = {}
         for q in questions:
             mark = "[red]⛔ блокирующий[/] " if q.blocking else ""
@@ -102,21 +107,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("input", nargs="?", help=f"файл требований ({', '.join(sorted(SUPPORTED))})")
     p.add_argument("report", nargs="?", help="путь к отчёту (.md); рядом появятся .html и .json")
-    p.add_argument("--provider", choices=["gemini", "openai", "ollama"], default=None,
-                   help="провайдер LLM: gemini, openai (любой OpenAI-совместимый API) или ollama (локальная модель)")
+    p.add_argument(
+        "--provider",
+        choices=["gemini", "openai", "ollama"],
+        default=None,
+        help="провайдер LLM: gemini, openai (любой OpenAI-совместимый API) или ollama (локальная модель)",
+    )
     p.add_argument("--model", help="модель (по умолчанию из .env)")
     p.add_argument("--fallback-models", help="резервные модели через запятую (при перегрузке, 404 или исчерпании квоты)")
     p.add_argument("--base-url", help="адрес OpenAI-совместимого API")
     p.add_argument("--interactive", "-i", action="store_true", help="задать уточняющие вопросы в консоли и перепроверить")
-    p.add_argument("--answers", type=Path, help="файл ответов на вопросы (JSON {\"Q-01\": \"…\"} или строки «Q-01: …»)")
+    p.add_argument("--answers", type=Path, help='файл ответов на вопросы (JSON {"Q-01": "…"} или строки «Q-01: …»)')
     p.add_argument("--replay", action="store_true", help="только сохранённые ответы модели (без сети и ключа)")
     p.add_argument("--no-cache", action="store_true", help="не использовать кэш ответов модели")
     p.add_argument("--cache-dir", type=Path, default=ROOT / ".cache" / "llm")
     p.add_argument("--max-calls", type=int, default=None, help="бюджет новых вызовов LLM на прогон (по умолчанию 12)")
     p.add_argument("--rpm", type=float, default=None, help="ограничение запросов в минуту (бесплатный Gemini — 5)")
-    p.add_argument("--parallel", type=int, default=int(os.getenv("LLM_PARALLEL", "4")),
-                   help="сколько ревьюеров работают одновременно (1 — последовательно)")
+    p.add_argument(
+        "--parallel",
+        type=int,
+        default=int(os.getenv("LLM_PARALLEL", "4")),
+        help="сколько ревьюеров работают одновременно (1 — последовательно)",
+    )
     p.add_argument("--list-models", action="store_true", help="показать доступные модели и выйти")
+    p.add_argument(
+        "--check", action="store_true", help="проверить окружение: зависимости, ключ, модели, Ollama (квоту не тратит)"
+    )
     p.add_argument("--version", action="version", version=f"revizor {__version__}")
     return p
 
@@ -129,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     console = Console()
+
+    if args.check:
+        from .check import run_check
+
+        return run_check(console)
 
     if args.list_models:
         for name in _Gemini.list_models(os.getenv("GEMINI_API_KEY", "")):
@@ -167,10 +188,13 @@ def main(argv: list[str] | None = None) -> int:
         console.print(f"[red]{e}[/]")
         return 2
 
-    console.print(Panel.fit(
-        f"[bold]Ревизор ТЗ[/] {__version__}\nДокумент: [cyan]{doc.title}[/] ({doc.path.name}, {len(doc.lines)} строк)\n"
-        f"Модель: {llm.provider} / {llm.model}" + (" [dim](replay)[/]" if args.replay else ""),
-        border_style="cyan"))
+    console.print(
+        Panel.fit(
+            f"[bold]Ревизор ТЗ[/] {__version__}\nДокумент: [cyan]{doc.title}[/] ({doc.path.name}, {len(doc.lines)} строк)\n"
+            f"Модель: {llm.provider} / {llm.model}" + (" [dim](replay)[/]" if args.replay else ""),
+            border_style="cyan",
+        )
+    )
 
     ask = _answers_from_file(args.answers) if args.answers else _ask_in_console(console) if args.interactive else None
     pipeline = Pipeline(llm, progress=ConsoleProgress(console), ask_answers=ask, parallel=args.parallel)
@@ -190,14 +214,19 @@ def main(argv: list[str] | None = None) -> int:
 
     verdict = "[green]можно начинать разработку[/]" if state.ready_for_development else "[red]не готов к разработке[/]"
     resolved = sum(1 for f in state.findings if not f.is_open)
-    console.print(Panel.fit(
-        f"Требований: {len(state.requirements)} · дефектов: {len(state.open_findings)} "
-        f"(🔴 {state.count('critical')} · 🟠 {state.count('major')} · 🟡 {state.count('minor')}) · "
-        f"вопросов: {len(state.questions)}" + (f" · закрыто уточнениями: {resolved}" if resolved else "")
-        + f"\nИтог: {verdict}\n"
-        f"Вызовов LLM: {llm.real_calls} новых, {len(llm.calls) - llm.real_calls} из кэша\n"
-        + "\n".join(f"Отчёт: {p}" for p in paths),
-        title="Готово", border_style="green"))
+    console.print(
+        Panel.fit(
+            f"Требований: {len(state.requirements)} · дефектов: {len(state.open_findings)} "
+            f"(🔴 {state.count('critical')} · 🟠 {state.count('major')} · 🟡 {state.count('minor')}) · "
+            f"вопросов: {len(state.questions)}"
+            + (f" · закрыто уточнениями: {resolved}" if resolved else "")
+            + f"\nИтог: {verdict}\n"
+            f"Вызовов LLM: {llm.real_calls} новых, {len(llm.calls) - llm.real_calls} из кэша\n"
+            + "\n".join(f"Отчёт: {p}" for p in paths),
+            title="Готово",
+            border_style="green",
+        )
+    )
     return 0
 
 

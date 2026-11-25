@@ -15,9 +15,10 @@ import json
 import re
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -53,7 +54,10 @@ def _fatal_reason(err: Exception) -> str | None:
 
     s = str(err)
     code = _status(err)
-    if re.search(r"API_KEY_INVALID|API key not valid|API key expired|invalid[_ ]api[_ ]key|Incorrect API key", s, re.I) or code == 401:
+    if (
+        re.search(r"API_KEY_INVALID|API key not valid|API key expired|invalid[_ ]api[_ ]key|Incorrect API key", s, re.I)
+        or code == 401
+    ):
         return "ключ API недействителен или просрочен — проверьте GEMINI_API_KEY / OPENAI_API_KEY в .env"
     if isinstance(err, urllib.error.URLError) and not isinstance(err, urllib.error.HTTPError):
         reason = getattr(err, "reason", None)
@@ -87,11 +91,7 @@ def inline_schema(model: type[BaseModel]) -> dict:
                 name = node["$ref"].rsplit("/", 1)[-1]
                 return walk(dict(defs[name]))
             # "title"/"default" как аннотации схемы убираем, но не поля модели с таким именем
-            return {
-                k: walk(v)
-                for k, v in node.items()
-                if not (k in ("title", "default") and not isinstance(v, dict))
-            }
+            return {k: walk(v) for k, v in node.items() if not (k in ("title", "default") and not isinstance(v, dict))}
         if isinstance(node, list):
             return [walk(x) for x in node]
         return node
@@ -237,9 +237,7 @@ class _OpenAICompatible:
                 "json_schema": {"name": schema.__name__, "schema": inline_schema(schema)},
             }
         else:
-            messages[1]["content"] += "\n\nВерни JSON строго по схеме:\n" + json.dumps(
-                inline_schema(schema), ensure_ascii=False
-            )
+            messages[1]["content"] += "\n\nВерни JSON строго по схеме:\n" + json.dumps(inline_schema(schema), ensure_ascii=False)
             kwargs["response_format"] = {"type": "json_object"}
         try:
             resp = self.client.chat.completions.create(**kwargs)
@@ -295,7 +293,8 @@ class _Ollama:
         if self.think_param:
             body["think"] = False
         req = urllib.request.Request(
-            f"{self.base}/api/chat", data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            f"{self.base}/api/chat",
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
         try:
@@ -385,9 +384,7 @@ class LLMClient:
         return sorted({c.model_version for c in self.calls if c.model_version})
 
     def _cache_key(self, system: str, user: str, schema: type[BaseModel]) -> str:
-        payload = json.dumps(
-            [self.provider, self.model, system, user, inline_schema(schema)], ensure_ascii=False, sort_keys=True
-        )
+        payload = json.dumps([self.provider, self.model, system, user, inline_schema(schema)], ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def generate(self, agent: str, system: str, user: str, schema: type[T]) -> T:
@@ -399,10 +396,16 @@ class LLMClient:
             data = json.loads(found.read_text(encoding="utf-8"))
             try:
                 obj = schema.model_validate_json(extract_json(data["text"]))
-                self.calls.append(CallRecord(agent=agent, model=self.model, cached=True, seconds=0.0,
-                                             **{k: data["meta"].get(k, 0) for k in
-                                                ("prompt_tokens", "output_tokens", "thoughts_tokens")},
-                                             model_version=data["meta"].get("model_version", self.model)))
+                self.calls.append(
+                    CallRecord(
+                        agent=agent,
+                        model=self.model,
+                        cached=True,
+                        seconds=0.0,
+                        **{k: data["meta"].get(k, 0) for k in ("prompt_tokens", "output_tokens", "thoughts_tokens")},
+                        model_version=data["meta"].get("model_version", self.model),
+                    )
+                )
                 return obj
             except (ValidationError, KeyError, json.JSONDecodeError):
                 pass  # битый кэш — запрашиваем заново
@@ -488,9 +491,7 @@ class LLMClient:
                     raise FatalLLMError(f"{backend.model}: {fatal}.") from err
                 reason = _unavailable_reason(err)
                 if reason == "нет доступа к модели" and not self._switch_model(reason, used_model):
-                    raise FatalLLMError(
-                        f"{backend.model}: нет доступа к модели (403) — проверьте ключ и права проекта."
-                    ) from err
+                    raise FatalLLMError(f"{backend.model}: нет доступа к модели (403) — проверьте ключ и права проекта.") from err
                 if reason == "нет доступа к модели":
                     continue
                 if reason:

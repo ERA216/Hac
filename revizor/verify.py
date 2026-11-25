@@ -19,8 +19,21 @@ THRESHOLD = 88.0
 
 _TRANS = str.maketrans(
     {
-        "ё": "е", "Ё": "е", "«": '"', "»": '"', "“": '"', "”": '"', "„": '"', "’": "'", "‘": "'",
-        "—": "-", "–": "-", "−": "-", " ": " ", " ": " ", " ": " ",
+        "ё": "е",
+        "Ё": "е",
+        "«": '"',
+        "»": '"',
+        "“": '"',
+        "”": '"',
+        "„": '"',
+        "’": "'",
+        "‘": "'",
+        "—": "-",
+        "–": "-",
+        "−": "-",
+        " ": " ",
+        " ": " ",
+        " ": " ",
     }
 )
 
@@ -84,8 +97,12 @@ class QuoteLocator:
         ln = self.doc.line(line_no)
         text = quote if quote is not None else clean_line(ln.text if ln else "")
         return Evidence(
-            quote=text, line_start=line_no, line_end=line_no, location=self.doc.location(line_no),
-            verified=True, score=100.0,
+            quote=text,
+            line_start=line_no,
+            line_end=line_no,
+            location=self.doc.location(line_no),
+            verified=True,
+            score=100.0,
         )
 
 
@@ -94,10 +111,7 @@ def dedupe_evidence(items: list[Evidence]) -> list[Evidence]:
     out: list[Evidence] = []
     for e in sorted(items, key=lambda x: -len(x.quote)):
         ne = normalize(e.quote)
-        dup = any(
-            o.line_start == e.line_start and (ne in normalize(o.quote) or normalize(o.quote) in ne)
-            for o in out
-        )
+        dup = any(o.line_start == e.line_start and (ne in normalize(o.quote) or normalize(o.quote) in ne) for o in out)
         if not dup:
             out.append(e)
     order = {id(e): i for i, e in enumerate(items)}

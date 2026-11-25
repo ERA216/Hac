@@ -1,0 +1,22 @@
+[project]
+name = "revizor"
+version = "0.1.0"
+description = "Ревизор ТЗ — мультиагентная статическая проверка требований (ISO/IEC/IEEE 29148, IEEE 830)"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 130
+target-version = "py311"
+extend-exclude = [".venv", ".cache", "reports", "pitch"]
+
+[tool.ruff.lint]
+# ошибки (F), стиль PEP 8 (E, W), порядок импортов (I), типичные баги (B), устаревшие конструкции (UP)
+select = ["E", "F", "W", "I", "B", "UP"]
+# RUF001–003: кириллица в строках и комментариях — это русский текст, а не путаница символов
+ignore = ["E731", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

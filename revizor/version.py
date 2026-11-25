@@ -12,9 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def _git(*args: str) -> str | None:
     try:
-        out = subprocess.run(
-            ["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=5, encoding="utf-8"
-        )
+        out = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=5, encoding="utf-8")
     except (OSError, subprocess.SubprocessError):
         return None
     return out.stdout.strip() if out.returncode == 0 and out.stdout.strip() else None

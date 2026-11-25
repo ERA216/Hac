@@ -34,11 +34,18 @@ def _w(pattern: str) -> re.Pattern:
 
 # --- 29148 п. 5.2.7: субъективные, размытые и незамкнутые формулировки
 VAGUE = {
-    "неизмеримое время": _w(r"быстр\w*|оперативн\w*|своевременн\w*|мгновенн\w*|немедленн\w*|сразу|в момент|в реальном времени|как можно скорее"),
+    "неизмеримое время": _w(
+        r"быстр\w*|оперативн\w*|своевременн\w*|мгновенн\w*|немедленн\w*|сразу|в момент|в реальном времени|как можно скорее"
+    ),
     "субъективная оценка": _w(r"удобн\w*|интуитивн\w*|дружелюбн\w*|простой|просто|легко|понятн\w*|красив\w*|современн\w*"),
-    "неизмеримое качество": _w(r"достаточн\w*|приемлем\w*|разумн\w*|оптимальн\w*|эффективн\w*|надёжн\w*|надежн\w*|гибк\w*|высок\w* (?:производительн\w*|доступн\w*|качеств\w*)"),
+    "неизмеримое качество": _w(
+        r"достаточн\w*|приемлем\w*|разумн\w*|оптимальн\w*|эффективн\w*|надёжн\w*|надежн\w*|гибк\w*|"
+        r"высок\w* (?:производительн\w*|доступн\w*|качеств\w*)"
+    ),
     "лазейка": _w(r"при необходимости|по возможности|если возможно|как правило|обычно|в основном|по усмотрению|желательно"),
-    "незамкнутое перечисление": _w(r"и т\.\s?д\.?|и т\.\s?п\.?|и др\.|и прочее|и тому подобное|и так далее|и далее|в том числе|включая,? но не ограничиваясь"),
+    "незамкнутое перечисление": _w(
+        r"и т\.\s?д\.?|и т\.\s?п\.?|и др\.|и прочее|и тому подобное|и так далее|и далее|в том числе|включая,? но не ограничиваясь"
+    ),
     "неопределённое количество": _w(r"несколько|некотор\w*|многие|много|мало|около|примерно|порядка|большое количество"),
     "неоднозначная связка": _w(r"и/или"),
     "неопределённая ссылка": _w(r"соответствующ\w*|вышеуказанн\w*|вышеперечисленн\w*|данный|этот|оный"),
@@ -48,7 +55,14 @@ _WEAK = {"неопределённая ссылка"}
 
 PLACEHOLDER = [
     (re.compile(r"\b(TBD|TBA|TODO|FIXME|XXX)\b"), "маркер «не определено»"),
-    (re.compile(r"заполня\w+ (позже|тестировщик\w*|аналитик\w*|разработчик\w*)|будет (заполнен|определ\w+|уточн\w+)|уточняется|не заполнен\w*", re.I), "раздел не заполнен"),
+    (
+        re.compile(
+            r"заполня\w+ (позже|тестировщик\w*|аналитик\w*|разработчик\w*)|"
+            r"будет (заполнен|определ\w+|уточн\w+)|уточняется|не заполнен\w*",
+            re.I,
+        ),
+        "раздел не заполнен",
+    ),
     (re.compile(r"Да\s*/\s*Нет"), "неотмеченный вариант шаблона «Да / Нет»"),
 ]
 _EMPTY_ROW = re.compile(r"^\|(\s*\|)+\s*$")
@@ -184,7 +198,9 @@ def check_empty_sections(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
         for _, no in run:
             hits.append(
                 RuleHit(
-                    rule="R-EMPTY", criterion="set_complete", severity="major",
+                    rule="R-EMPTY",
+                    criterion="set_complete",
+                    severity="major",
                     title="Пустой раздел",
                     problem="Раздел объявлен в документе, но не содержит ни одного требования или описания.",
                     recommendation="Заполнить раздел или удалить его с пометкой «не применимо».",
@@ -204,7 +220,9 @@ def check_money_units(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     evid_lines = (both or minor[:1]) + [n for n in major if n not in both][:1]
     return [
         RuleHit(
-            rule="R-UNITS", criterion="consistent", severity="major",
+            rule="R-UNITS",
+            criterion="consistent",
+            severity="major",
             title="Денежные величины заданы в разных единицах",
             problem=(
                 "Часть сумм задана в мелких единицах (тиын/копейки), часть — в основных (тенге/₸). "
@@ -220,7 +238,8 @@ def check_money_units(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
 def check_http(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     hits = []
     method_lines = [
-        ln for ln in doc.lines
+        ln
+        for ln in doc.lines
         if (re.search(r"REST type|Method|Метод|Тип запроса|HTTP[- ]метод|Verb", ln.text, re.I) and _HTTP_METHOD.search(ln.text))
         or re.match(r"^\s*[*`]*(GET|POST|PUT|PATCH|DELETE)[*`]*\s+`?/[\w/{}.-]+", ln.text)  # «GET /transfers/create»
     ]
@@ -230,12 +249,18 @@ def check_http(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
             continue
         # ищем признаки изменения состояния в том же разделе API
         scope = [ln for ln in doc.lines if ln.section.split(" › ")[0] == ml.section.split(" › ")[0]]
-        mut = [ln for ln in scope if _MUTATING_URL.search(ln.text) or (
-            re.search(r"Description|Описание|Назначение", ln.text, re.I) and _MUTATING_WORD.search(ln.text))]
+        mut = [
+            ln
+            for ln in scope
+            if _MUTATING_URL.search(ln.text)
+            or (re.search(r"Description|Описание|Назначение", ln.text, re.I) and _MUTATING_WORD.search(ln.text))
+        ]
         if mut:
             hits.append(
                 RuleHit(
-                    rule="R-HTTP-GET", criterion="appropriate", severity="critical",
+                    rule="R-HTTP-GET",
+                    criterion="appropriate",
+                    severity="critical",
                     title="GET используется для изменяющей операции",
                     problem=(
                         "Метод GET по HTTP-семантике безопасен и идемпотентен: его кэшируют прокси, "
@@ -250,7 +275,9 @@ def check_http(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
         if body:
             hits.append(
                 RuleHit(
-                    rule="R-HTTP-BODY", criterion="consistent", severity="minor",
+                    rule="R-HTTP-BODY",
+                    criterion="consistent",
+                    severity="minor",
                     title="Для GET-запроса указан Content-Type тела",
                     problem="У GET-запроса нет тела, поэтому указание Content-Type запроса противоречит выбранному методу.",
                     recommendation="Убрать Content-Type запроса или сменить метод на POST/PUT с JSON-телом.",
@@ -278,7 +305,9 @@ def check_status_codes(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
         if code not in described:
             hits.append(
                 RuleHit(
-                    rule="R-HTTP-CODE", criterion="complete", severity="major",
+                    rule="R-HTTP-CODE",
+                    criterion="complete",
+                    severity="major",
                     title=f"Код ответа {code} упомянут, но не описан",
                     problem=f"Код {code} фигурирует в тексте, но для него нет описания ситуации и примера ответа.",
                     recommendation=f"Описать, когда возвращается {code}, и привести пример тела ответа — или убрать упоминание.",
@@ -314,7 +343,8 @@ def check_api_tables(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
                 if fi is not None and fi < len(cells) and cells[fi]:
                     formats[name].setdefault(cells[fi].lower(), ln.no)
                 in_query = bool(re.search(r"query|строк\w* запроса", ln.section, re.I)) or (
-                    li is not None and li < len(cells) and re.search(r"query|url|строк", cells[li], re.I))
+                    li is not None and li < len(cells) and re.search(r"query|url|строк", cells[li], re.I)
+                )
                 if in_query and _SENSITIVE_PARAM.search(name):
                     sensitive.append((ln.no, name))
     # чувствительные параметры прямо в примерах URL: «?phone=…», «&cardId=…»
@@ -327,7 +357,9 @@ def check_api_tables(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
         if len(fmts) > 1:
             hits.append(
                 RuleHit(
-                    rule="R-API-TYPE", criterion="consistent", severity="major",
+                    rule="R-API-TYPE",
+                    criterion="consistent",
+                    severity="major",
                     title=f"Параметр «{name}» имеет разные типы: {', '.join(fmts)}",
                     problem=(
                         f"Один и тот же параметр «{name}» описан с разными форматами ({', '.join(fmts)}). "
@@ -340,13 +372,18 @@ def check_api_tables(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     for no, name in sensitive:
         hits.append(
             RuleHit(
-                rule="R-API-QUERY-PII", criterion="risk", severity="major",
+                rule="R-API-QUERY-PII",
+                criterion="risk",
+                severity="major",
                 title=f"Идентификатор «{name}» передаётся в строке запроса",
                 problem=(
                     "Параметры строки запроса сохраняются в логах веб-серверов, прокси, APM и истории — "
                     "идентификаторы карт/счетов/клиентов в URL создают риск утечки."
                 ),
-                recommendation="Передавать идентификатор в теле запроса или в пути с маскированием в логах; описать требования к логированию.",
+                recommendation=(
+                    "Передавать идентификатор в теле запроса или в пути с маскированием в логах; "
+                    "описать требования к логированию."
+                ),
                 evidence=[loc.line_evidence(no)],
             )
         )
@@ -355,15 +392,28 @@ def check_api_tables(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
 
 # --- шаблон ТЗ финтех-проекта (основная часть и дочерняя спецификация REST API)
 TEMPLATE_MAIN = [
-    ("общие сведения", "minor"), ("цели", "major"), ("архитектура решения", "minor"),
-    ("дизайн процесса ui", "minor"), ("требования к изменениям", "minor"), ("bpmn", "minor"),
-    ("функциональные требования", "critical"), ("sequence", "minor"), ("нефункциональные требования", "major"),
-    ("требования к данным", "major"), ("требования к интеграции", "major"), ("требования к тестированию", "minor"),
-    ("критерии приемки", "major"), ("ревью требований", "minor"), ("блок согласующих", "minor"),
+    ("общие сведения", "minor"),
+    ("цели", "major"),
+    ("архитектура решения", "minor"),
+    ("дизайн процесса ui", "minor"),
+    ("требования к изменениям", "minor"),
+    ("bpmn", "minor"),
+    ("функциональные требования", "critical"),
+    ("sequence", "minor"),
+    ("нефункциональные требования", "major"),
+    ("требования к данным", "major"),
+    ("требования к интеграции", "major"),
+    ("требования к тестированию", "minor"),
+    ("критерии приемки", "major"),
+    ("ревью требований", "minor"),
+    ("блок согласующих", "minor"),
 ]
 TEMPLATE_API = [
-    ("общие параметры", "minor"), ("логика работы метода", "major"), ("параметры запроса", "major"),
-    ("ответ", "major"), ("статусы", "major"),
+    ("общие параметры", "minor"),
+    ("логика работы метода", "major"),
+    ("параметры запроса", "major"),
+    ("ответ", "major"),
+    ("статусы", "major"),
 ]
 
 
@@ -376,7 +426,8 @@ def check_template_sections(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     """Если документ оформлен по шаблону ТЗ, проверяем, что обязательные разделы на месте."""
     # заголовком считаем и строку, целиком выделенную жирным (PDF/DOCX часто теряют уровни заголовков)
     heads = [
-        (ln.no, _norm_heading(ln.text)) for ln in doc.lines
+        (ln.no, _norm_heading(ln.text))
+        for ln in doc.lines
         if ln.heading or re.match(r"^#{1,6}\s", ln.text) or re.fullmatch(r"\*\*[^*|]{3,80}\*\*", ln.text.strip())
     ]
     if not heads:
@@ -394,12 +445,17 @@ def check_template_sections(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
         if not missing:
             continue
         worst = min((sev for _, sev in missing), key=lambda s: {"critical": 0, "major": 1, "minor": 2}[s])
-        anchor = heads[0][0] if name == "основной части ТЗ" else next(
-            (no for no, h in heads if any(k in h for k, _ in template)), heads[0][0])
+        anchor = (
+            heads[0][0]
+            if name == "основной части ТЗ"
+            else next((no for no, h in heads if any(k in h for k, _ in template)), heads[0][0])
+        )
         names = ", ".join(f"«{k}»" for k, _ in missing)
         hits.append(
             RuleHit(
-                rule="R-TEMPLATE", criterion="set_complete", severity=worst,
+                rule="R-TEMPLATE",
+                criterion="set_complete",
+                severity=worst,
                 title=f"В {name} нет обязательных разделов шаблона: {names}",
                 problem=(
                     f"Документ оформлен по шаблону ТЗ (найдено разделов шаблона: {len(found)} из {len(template)}), "
@@ -435,38 +491,196 @@ def check_requirement_ids(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
             continue  # одиночный «ID» — скорее всего не система нумерации
         for n, lines in sorted(nums.items()):
             if len(lines) > 1:
-                hits.append(RuleHit(
-                    rule="R-ID-DUP", criterion="traceable", severity="major",
-                    title=f"Идентификатор {prefix}-{n} используется несколько раз",
-                    problem=f"Требование {prefix}-{n} определено в {len(lines)} местах: ссылки на него неоднозначны, трассировка ломается.",
-                    recommendation="Присвоить требованиям уникальные идентификаторы.",
-                    evidence=[loc.line_evidence(x) for x in lines[:3]],
-                ))
+                hits.append(
+                    RuleHit(
+                        rule="R-ID-DUP",
+                        criterion="traceable",
+                        severity="major",
+                        title=f"Идентификатор {prefix}-{n} используется несколько раз",
+                        problem=(
+                            f"Требование {prefix}-{n} определено в {len(lines)} местах: "
+                            "ссылки на него неоднозначны, трассировка ломается."
+                        ),
+                        recommendation="Присвоить требованиям уникальные идентификаторы.",
+                        evidence=[loc.line_evidence(x) for x in lines[:3]],
+                    )
+                )
         present = sorted(nums)
         gaps = [n for n in range(present[0], present[-1] + 1) if n not in nums]
         if gaps:
             after = max(n for n in present if n < gaps[0])
-            hits.append(RuleHit(
-                rule="R-ID-GAP", criterion="traceable", severity="minor",
-                title=f"Пропуск в нумерации требований: нет {', '.join(f'{prefix}-{g}' for g in gaps)}",
-                problem=(
-                    f"Требования {prefix} пронумерованы с пропуском ({', '.join(f'{prefix}-{g}' for g in gaps)}). "
-                    "Возможно, требование удалено или потеряно при редактировании; ссылки на него в смежных документах станут висячими."
-                ),
-                recommendation="Восстановить пропущенное требование или явно пометить номер как исключённый.",
-                evidence=[loc.line_evidence(nums[after][0])],
-            ))
+            hits.append(
+                RuleHit(
+                    rule="R-ID-GAP",
+                    criterion="traceable",
+                    severity="minor",
+                    title=f"Пропуск в нумерации требований: нет {', '.join(f'{prefix}-{g}' for g in gaps)}",
+                    problem=(
+                        f"Требования {prefix} пронумерованы с пропуском ({', '.join(f'{prefix}-{g}' for g in gaps)}). "
+                        "Возможно, требование удалено или потеряно при редактировании; "
+                        "ссылки на него в смежных документах станут висячими."
+                    ),
+                    recommendation="Восстановить пропущенное требование или явно пометить номер как исключённый.",
+                    evidence=[loc.line_evidence(nums[after][0])],
+                )
+            )
         # ссылки на несуществующие требования того же префикса
         for ln in doc.lines:
             for m in _REQ_ID.finditer(ln.text):
                 if m.group(1) == prefix and int(m.group(2)) not in nums:
-                    hits.append(RuleHit(
-                        rule="R-ID-REF", criterion="traceable", severity="major",
-                        title=f"Ссылка на несуществующее требование {m.group(0)}",
-                        problem=f"В тексте упоминается {m.group(0)}, но требование с таким идентификатором в документе не определено.",
-                        recommendation="Исправить ссылку или добавить требование.",
-                        evidence=[loc.line_evidence(ln.no)],
-                    ))
+                    hits.append(
+                        RuleHit(
+                            rule="R-ID-REF",
+                            criterion="traceable",
+                            severity="major",
+                            title=f"Ссылка на несуществующее требование {m.group(0)}",
+                            problem=(
+                                f"В тексте упоминается {m.group(0)}, "
+                                "но требование с таким идентификатором в документе не определено."
+                            ),
+                            recommendation="Исправить ссылку или добавить требование.",
+                            evidence=[loc.line_evidence(ln.no)],
+                        )
+                    )
+    return hits
+
+
+# --- чек-лист ревью финтех-ТЗ: измеримость НФТ, часовой пояс, идемпотентность, этап обработки операции
+_NFR_SECTION = re.compile(r"нефункциональн|производительн|надёжност|надежност|доступност|\bNFR\b|\bSLA\b", re.I)
+_PERIOD = re.compile(
+    r"(?<![\w-])(?:месяц\w*|сутк\w*|календарн\w*|ежедневн\w*|ежемесячн\w*|в день|за день|начал\w* (?:дня|месяца|суток)|"
+    r"конц\w* (?:дня|месяца|суток)|полуноч\w*)(?![\w-])",
+    re.I,
+)
+_TIMEZONE = re.compile(
+    r"UTC|GMT|часов\w* пояс|по времени|Алматы|Астан|Нур-Султан|MSK|московск\w* времен|[+−-]0?[1-9]:?00\b", re.I
+)
+_REPEAT = re.compile(
+    r"повторн\w* (?:доставк|нажати|отправк|запрос|вызов|событи|сохранени|списани|платеж|перевод)\w*|"
+    r"двойн\w* (?:списани|начислени|отправк|перевод|платеж)\w*|дубл\w* (?:операц|событи|списани|платеж)\w*|идемпотент\w*",
+    re.I,
+)
+_IDEMPOTENCY_MECHANISM = re.compile(
+    r"idempotency|idempotent[-_ ]?key|X-Request-Id|request[-_]?id|operation[-_]?id|external[-_]?id|"
+    r"ключ\w* (?:идемпотент|дедупликац)|уникальн\w* (?:ключ|идентификатор\w*) (?:запроса|операции|события)",
+    re.I,
+)
+_TXN_VAGUE = re.compile(
+    r"проведённ\w* (?:покупк|операц|транзакц|платеж)\w*|проведенн\w* (?:покупк|операц|транзакц|платеж)\w*|"
+    r"успешн\w* (?:покупк|операц|транзакц|платеж)\w*",
+    re.I,
+)
+_TXN_STAGE_DEFINED = re.compile(
+    r"авторизаци\w* (?:покупк|операц|транзакц|платеж|по карт)|авторизованн\w* (?:операц|покупк|транзакц)|клиринг|"
+    r"\bholds?\b|холд|блокировк\w* (?:средств|суммы)|settlement|clearing|финансов\w* подтвержд",
+    re.I,
+)
+_CARD_DOMAIN = re.compile(r"карт\w*|card|процессинг|POS|эквайринг", re.I)
+
+
+def _content_lines(doc: Document):
+    """Строки с содержанием: без заголовков, разделителей таблиц, кода и служебных разделов."""
+    in_code = False
+    for ln in doc.lines:
+        t = ln.text.strip()
+        if t.startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code or not t or ln.heading or t.startswith("#") or _is_table_sep(t) or t == "---":
+            continue
+        if re.search(r"общие сведения|ревью требований|блок согласующ", ln.section, re.I):
+            continue
+        yield ln
+
+
+def check_fintech_checklist(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    lines = list(_content_lines(doc))
+    full = "\n".join(ln.text for ln in doc.lines)
+    hits = []
+
+    nfr = [
+        ln
+        for ln in lines
+        if _NFR_SECTION.search(ln.section)
+        and not re.search(r"\d", ln.text)
+        and not any(rx.search(ln.text) for rx, _ in PLACEHOLDER)
+    ]
+    for ln in nfr[:3]:
+        hits.append(
+            RuleHit(
+                rule="R-NFR-METRIC",
+                criterion="verifiable",
+                severity="major",
+                title="Нефункциональное требование без числового показателя",
+                problem=(
+                    "В требовании нет ни одного числа: не задан измеримый порог (время, доля запросов, нагрузка, "
+                    "доступность), поэтому выполнение нельзя объективно проверить нагрузочным или иным тестом."
+                ),
+                recommendation="Задать метрику, порог, долю (например, p95), нагрузку и точку измерения.",
+                evidence=[loc.line_evidence(ln.no)],
+            )
+        )
+
+    if not _TIMEZONE.search(full):
+        period = [ln for ln in lines if _PERIOD.search(ln.text) and not _NFR_SECTION.search(ln.section)]
+        if period:
+            hits.append(
+                RuleHit(
+                    rule="R-TIMEZONE",
+                    criterion="unambiguous",
+                    severity="major",
+                    title="Границы периода заданы без часового пояса",
+                    problem=(
+                        "Требования опираются на календарный период (день, месяц), но в документе не указан часовой пояс. "
+                        "Операции около полуночи будут отнесены к разным периодам в зависимости от сервера — лимиты и "
+                        "счётчики разойдутся."
+                    ),
+                    recommendation="Указать часовой пояс и точное правило границы периода (например, 00:00:00–23:59:59 UTC+5).",
+                    evidence=[loc.line_evidence(ln.no) for ln in period[:2]],
+                )
+            )
+
+    repeats = [ln for ln in lines if _REPEAT.search(ln.text)]
+    if repeats and not _IDEMPOTENCY_MECHANISM.search(full):
+        hits.append(
+            RuleHit(
+                rule="R-IDEMPOTENCY",
+                criterion="complete",
+                severity="major",
+                title="Защита от повторов заявлена, но механизм не задан",
+                problem=(
+                    "Документ требует корректно обрабатывать повторы (повторная доставка, повторное нажатие, двойное "
+                    "списание), но не определяет ключ идемпотентности или дедупликации и где он передаётся. "
+                    "Реализации будут разными, а двойные операции — возможны."
+                ),
+                recommendation=(
+                    "Определить ключ идемпотентности (например, идентификатор операции или заголовок Idempotency-Key), "
+                    "срок его хранения и ответ на повтор."
+                ),
+                evidence=[loc.line_evidence(ln.no) for ln in repeats[:2]],
+            )
+        )
+
+    vague = [ln for ln in lines if _TXN_VAGUE.search(ln.text)]
+    if vague and _CARD_DOMAIN.search(full) and not _TXN_STAGE_DEFINED.search(full):
+        word = _TXN_VAGUE.search(vague[0].text).group(0)
+        hits.append(
+            RuleHit(
+                rule="R-TXN-STAGE",
+                criterion="unambiguous",
+                severity="major",
+                title=f"Не определён этап обработки операции: «{word}»",
+                problem=(
+                    f"Формулировка «{word}» не говорит, учитывается ли операция при авторизации (блокировка средств) "
+                    "или после клиринга (финансовое подтверждение). От этого зависят суммы, даты отнесения к периоду "
+                    "и обработка отмен."
+                ),
+                recommendation=(
+                    "Явно указать этап (авторизация или клиринг) и правило для отменённых и частично подтверждённых операций."
+                ),
+                evidence=[loc.line_evidence(vague[0].no)],
+            )
+        )
     return hits
 
 
@@ -476,6 +690,7 @@ ALL_RULES = [
     check_empty_sections,
     check_template_sections,
     check_requirement_ids,
+    check_fintech_checklist,
     check_money_units,
     check_http,
     check_status_codes,

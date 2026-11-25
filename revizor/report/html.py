@@ -43,8 +43,7 @@ def build_data(report: dict, doc: Document) -> dict:
     open_f = [f for f in findings if f.get("status") != "resolved"]
     data["doc_lines"] = [{"no": ln.no, "text": ln.text, "page": ln.page, "section": ln.section} for ln in doc.lines]
     data["criteria"] = {
-        code: {"name": c.name, "level": c.level, "source": c.source, "definition": c.definition}
-        for code, c in CRITERIA.items()
+        code: {"name": c.name, "level": c.level, "source": c.source, "definition": c.definition} for code, c in CRITERIA.items()
     }
     data["severity_names"] = SEVERITY_NAMES
     data["kind_names"] = KIND_NAMES

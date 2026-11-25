@@ -21,8 +21,14 @@ jobs:
       - name: Тесты (без сети и ключа)
         run: pytest -q
 
-      - name: Воспроизведение финального отчёта (--replay, без ключа)
+      - name: Прогон без ключа (--replay)
         run: python -m revizor examples/requirements.md out/report.md --replay
 
       - name: Оценка по эталону
         run: python eval/score.py out/report.json
+
+      - name: Линтер и формат (ruff)
+        run: |
+          pip install ruff
+          ruff check .
+          ruff format --check .

@@ -51,7 +51,7 @@ def test_chunk_ranges_cover_document_without_overlap():
     assert chunk_ranges(doc) == [(1, len(doc.lines))]
     parts = chunk_ranges(doc, max_chars=3000)
     assert len(parts) > 2 and parts[0][0] == 1 and parts[-1][1] == len(doc.lines)
-    assert all(b + 1 == c for (_, b), (c, _) in zip(parts, parts[1:]))
+    assert all(b + 1 == c for (_, b), (c, _) in zip(parts, parts[1:], strict=False))
 
 
 def test_pipeline_survives_dead_model():

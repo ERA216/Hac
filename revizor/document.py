@@ -151,9 +151,7 @@ def _build(path: Path, fmt: str, raw: bytes, chunks: list[tuple[int | None, str]
     # для текстовых форматов хэш не зависит от переводов строк (CRLF в Windows, LF в git) —
     # паспорт отчёта совпадает на любой ОС и с оригиналом в репозитории
     digest_src = raw.replace(b"\r\n", b"\n") if fmt in ("md", "markdown", "txt") else raw
-    return Document(
-        path=path, fmt=fmt, sha256=hashlib.sha256(digest_src).hexdigest(), title=title, lines=lines, pages=pages
-    )
+    return Document(path=path, fmt=fmt, sha256=hashlib.sha256(digest_src).hexdigest(), title=title, lines=lines, pages=pages)
 
 
 def _read_text(raw: bytes) -> str:
@@ -248,7 +246,5 @@ def load_document(path: str | Path) -> Document:
         chunks = [(None, _read_text(raw))]
     doc = _build(path, ext.lstrip("."), raw, chunks)
     if not any(ln.text.strip() for ln in doc.lines):
-        raise ValueError(
-            "Из документа не удалось извлечь текст (возможно, это скан без текстового слоя)."
-        )
+        raise ValueError("Из документа не удалось извлечь текст (возможно, это скан без текстового слоя).")
     return doc
