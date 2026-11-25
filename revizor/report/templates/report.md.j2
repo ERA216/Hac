@@ -1,0 +1,246 @@
+{% macro finding(f) %}
+#### {{ ICON[f.severity] }} {{ f.fid }}. {{ f.title }}
+{% if not f.is_open %}
+
+> ✔️ **Закрыто уточнением.** {{ f.status_comment }}
+{% elif f.status == "changed" %}
+
+> ↻ **Изменено после уточнения.** {{ f.status_comment }}
+{% endif %}
+
+- **Критичность:** {{ SEV[f.severity] }}
+- **Критерий:** {{ crit_name(f.criterion) }} — {{ criteria[f.criterion].source if f.criterion in criteria else "" }}
+{% if f.requirement_ids %}
+- **Требования:** {% for rid in f.requirement_ids %}{{ rid }}{% if reqs[rid].source_id %} ({{ reqs[rid].source_id }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+
+{% endif %}
+- **Где в документе:**
+{% for e in f.evidence %}
+  - «{{ e.quote | q }}» — *{{ e.location }}*
+{% endfor %}
+- **Проблема:** {{ f.problem }}
+- **Что исправить:** {{ f.recommendation }}
+{% if f.rewrite %}
+- **Предлагаемая формулировка:** {{ f.rewrite }}
+{% endif %}
+- **Обнаружили:** {{ f.sources | join(", ") }}
+{% endmacro %}
+# Отчёт о проверке требований: «{{ doc.title }}»
+
+> Отчёт сформирован автоматически агентом **«Ревизор ТЗ»** ({{ agent_version }}) по входному файлу без ручных правок.
+> Все цитаты в отчёте автоматически сверены с исходным документом.
+
+**Кратко:** {% if state.ready_for_development %}✅ документ можно передавать в разработку{% else %}❌ документ **не готов** к разработке{% endif %}.
+Требований: {{ state.requirements | length }} · открытых дефектов: {{ state.open_findings | length }}
+(🔴 критичных: {{ state.count("critical") }}, 🟠 существенных: {{ state.count("major") }}, 🟡 замечаний: {{ state.count("minor") }})
+· уточняющих вопросов: {{ state.questions | length }}{% if state.questions %} (блокирующих: {{ state.questions | selectattr("blocking") | list | length }}){% endif %}.
+
+{% if state.errors %}
+> ⚠️ **Прогон выполнен не полностью.** Шаги с ошибкой: {{ state.errors | join("; ") }}
+{% endif %}
+
+## 1. Паспорт прогона
+
+| Параметр | Значение |
+| :--- | :--- |
+| Документ | {{ doc.title | cell }} |
+| Входной файл | `{{ doc.path.name }}` (формат {{ doc.fmt | upper }}, строк: {{ doc.lines | length }}{% if doc.pages %}, страниц: {{ doc.pages }}{% endif %}) |
+| SHA-256 файла | `{{ doc.sha256 }}` |
+| Дата и время прогона | {{ state.started_at.strftime("%d.%m.%Y %H:%M") }} (Алматы, UTC+5) |
+| Модель | {{ llm.provider }} / `{{ llm.model }}`{% if llm.model_versions %}; фактическая версия: {% for v in llm.model_versions %}`{{ v }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %} |
+| Версия агента | {{ agent_version | cell }} |
+| Вызовы LLM | {{ calls | length }} (новых: {{ real_calls }}, из кэша: {{ cached_calls }}); токены: вход {{ tokens_in }}, выход {{ tokens_out }} |
+| Длительность | {{ total_seconds }} с |
+| Проверка цитат | проверено {{ state.quotes_checked }}, подтверждено {{ state.quotes_verified }}; находок отброшено как неподтверждённые: {{ state.unverified | length }} |
+| Критерии | ISO/IEC/IEEE 29148:2018 п. 5.2.5, 5.2.6, 5.2.7; IEEE Std 830-1998 п. 4.3 |
+
+## 2. Как агент нарезал требования
+
+Агент выделил **{{ state.requirements | length }}** требований. Если у пункта в документе не было номера, агент присвоил свой идентификатор и сохранил цитату.
+
+| ID в отчёте | ID в документе | Тип | Краткая формулировка | Цитата | Место |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+{% for r in state.requirements %}
+| {{ r.rid }} | {{ (r.source_id or "— (нет номера)") | cell }} | {{ KIND.get(r.kind, r.kind) }} | {{ r.summary | cell }} | «{{ r.evidence.quote | cell }}» | {{ r.evidence.location | cell }} |
+{% endfor %}
+
+## 3. Проверка каждого требования
+
+### 3.1. Сводная матрица
+
+Требований без замечаний: **{{ clean_reqs }} из {{ state.requirements | length }}**.
+
+| Требование | ID в документе | Итог | Нарушенные критерии | Дефекты |
+| :--- | :--- | :--- | :--- | :--- |
+{% for row in req_rows %}
+| {{ row.r.rid }} | {{ (row.r.source_id or "—") | cell }} | {{ row.status }} | {{ row.criteria | join(", ") | cell or "—" }} | {{ row.fids | join(", ") or "—" }} |
+{% endfor %}
+
+### 3.2. Дефекты отдельных требований
+
+{% for f in req_findings %}
+{{ finding(f) }}
+{% else %}
+Дефектов в отдельных требованиях не найдено.
+{% endfor %}
+
+## 4. Проверка всего набора требований
+
+### 4.1. Оценка набора по критериям
+
+| Критерий | Источник | Результат | Дефекты |
+| :--- | :--- | :--- | :--- |
+{% for row in set_criteria %}
+| {{ row.c.name }} | {{ row.c.source }} | {% if row.ok %}✅ нарушений не найдено{% else %}{{ ICON[row.worst] }} нарушен{% endif %} | {{ row.fids | join(", ") or "—" }} |
+{% endfor %}
+
+### 4.2. Дефекты, относящиеся к документу в целом
+
+{% for f in set_findings %}
+{{ finding(f) }}
+{% else %}
+Дефектов уровня всего документа, не привязанных к отдельным требованиям, нет (дефекты согласованности между требованиями приведены в п. 3.2).
+{% endfor %}
+
+{% if state.trace %}
+### 4.3. Трассируемость требований
+
+| Требование | Проверяется критериями приёмки | Реализуется | Замечание |
+| :--- | :--- | :--- | :--- |
+{% for t in state.trace %}
+| {{ t.requirement_id }}{% if reqs[t.requirement_id].source_id %} ({{ reqs[t.requirement_id].source_id | cell }}){% endif %} | {{ t.verified_by | join(", ") or "❌ нет" }} | {{ t.implemented_by | join(", ") or "—" }} | {{ t.note | cell }} |
+{% endfor %}
+{% endif %}
+
+{% if state.checklist %}
+### 4.4. Чек-лист «Ревью требований» (заполнен агентом)
+
+| Проверка | Ответ агента | Комментарий | Дефекты |
+| :--- | :--- | :--- | :--- |
+{% for c in state.checklist %}
+| {{ c.item | cell }} | {% if c.answer == "Да" %}✅{% elif c.answer == "Нет" %}❌{% else %}➖{% endif %} {{ c.answer }} | {{ c.comment | cell }} | {{ c.finding_ids | join(", ") or "—" }} |
+{% endfor %}
+{% endif %}
+
+## 5. Уточняющие вопросы к автору ТЗ
+
+{% for q in state.questions %}
+**{{ q.qid }}.** {% if q.blocking %}⛔ *Блокирующий.* {% endif %}*Кому:* {{ q.addressee }}{% if q.finding_ids %} · *Дефекты:* {{ q.finding_ids | join(", ") }}{% endif %}{% if q.requirement_ids %} · *Требования:* {{ q.requirement_ids | join(", ") }}{% endif %}
+
+{{ q.question }}
+
+{% for o in q.options %}
+{{ loop.index }}. {{ o }}
+{% endfor %}
+
+*Зачем:* {{ q.why }}
+{% if q.answer %}
+
+> **Ответ:** {{ q.answer }}
+{% endif %}
+
+{% else %}
+Вопросов нет.
+{% endfor %}
+
+{% if state.tests %}
+## 6. Недостающие тест-кейсы (предложены агентом)
+
+| ID | Требования | Сценарий | Исходные условия | Действие | Ожидаемый результат | Что сейчас не покрыто |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+{% for t in state.tests %}
+| {{ t.tid }} | {{ t.requirement_ids | join(", ") }} | {{ t.title | cell }} | {{ t.preconditions | cell }} | {{ t.action | cell }} | {{ t.expected | cell }} | {{ t.gap | cell }} |
+{% endfor %}
+{% endif %}
+
+## 7. Сводка
+
+- Требований проверено: **{{ state.requirements | length }}**, из них без замечаний: **{{ clean_reqs }}**.
+- Дефектов (открытых): **{{ state.open_findings | length }}**: 🔴 критичных — {{ state.count("critical") }}, 🟠 существенных — {{ state.count("major") }}, 🟡 замечаний — {{ state.count("minor") }}.
+{% if resolved %}
+- Закрыто уточнениями: {{ resolved | length }}.
+{% endif %}
+- Уточняющих вопросов: {{ state.questions | length }}{% if state.questions %} (блокирующих — {{ state.questions | selectattr("blocking") | list | length }}){% endif %}.
+
+**Нарушения по критериям:**
+
+| Критерий | Источник | Дефектов |
+| :--- | :--- | ---: |
+{% for code, n in by_criterion %}
+| {{ crit_name(code) }} | {{ criteria[code].source if code in criteria else "" }} | {{ n }} |
+{% endfor %}
+
+**Критичные дефекты** (непроверяемые, противоречивые, неполные формулировки):
+
+{% for f in critical %}
+- **{{ f.fid }}** — {{ f.title }}{% if f.requirement_ids %} ({{ f.requirement_ids | join(", ") }}){% endif %} · *{{ crit_name(f.criterion) }}*
+{% else %}
+- нет
+{% endfor %}
+
+## 8. Итог
+
+| Вопрос | Решение |
+| :--- | :--- |
+| Можно начинать разработку? | {% if state.ready_for_development %}✅ Да{% else %}❌ Нет{% endif %} |
+| Можно начинать тестирование (проектирование тестов)? | {% if state.ready_for_testing %}✅ Да{% else %}❌ Нет{% endif %} |
+
+{% if state.verdict %}
+{{ state.verdict.summary }}
+{% endif %}
+
+**Что исправить в первую очередь:**
+
+{% for f in priorities %}
+{{ loop.index }}. **{{ f.fid }}** — {{ f.title }}. {{ f.recommendation }}
+{% else %}
+Срочных исправлений нет.
+{% endfor %}
+
+---
+
+## Приложение А. Как работал агент
+
+| Шаг | Исполнитель | Время, с | Результат |
+| :--- | :--- | ---: | :--- |
+{% for s in state.steps %}
+| {{ s.title }} | {{ s.kind }} | {{ s.seconds }} | {% if not s.ok %}⚠️ {% endif %}{{ s.note | cell }} |
+{% endfor %}
+
+| Агент | Модель | Кэш | Время, с | Токены вход / выход |
+| :--- | :--- | :--- | ---: | :--- |
+{% for c in calls %}
+| {{ c.agent }} | `{{ c.model_version }}` | {{ "да" if c.cached else "нет" }} | {{ c.seconds }} | {{ c.prompt_tokens }} / {{ c.output_tokens + c.thoughts_tokens }} |
+{% endfor %}
+
+{% if state.rejected %}
+## Приложение Б. Находки, отклонённые судьёй
+
+| Кандидат | Источник | Находка | Причина отклонения |
+| :--- | :--- | :--- | :--- |
+{% for r in state.rejected %}
+| {{ r.candidate_id }} | {{ r.source | cell }} | {{ r.title | cell }} | {{ r.reason | cell }} |
+{% endfor %}
+{% endif %}
+
+{% if state.unverified %}
+## Приложение В. Находки, отброшенные проверкой цитат
+
+Цитаты этих находок не найдены в документе, поэтому они не вошли в отчёт.
+
+{% for f in state.unverified %}
+- {{ f.title }} *({{ f.sources | join(", ") }})*: «{{ f.evidence[0].quote | q if f.evidence else "" }}»
+{% endfor %}
+{% endif %}
+
+## Приложение Г. Методика
+
+Агент применяет критерии качества требований ISO/IEC/IEEE 29148:2018 и IEEE Std 830-1998 (определения изложены своими словами):
+
+| Критерий | Уровень | Источник | Что проверяется |
+| :--- | :--- | :--- | :--- |
+{% for c in criteria.values() %}
+| {{ c.name }} | {{ "набор" if c.level == "set" else "требование" }} | {{ c.source }} | {{ c.definition | cell }} |
+{% endfor %}
+
+Критичность: 🔴 критично — противоречие, непроверяемость или неполнота, мешающая реализации и приёмке; 🟠 существенно — неоднозначность, проектное решение в требовании, риск ИБ, рассогласование; 🟡 замечание — оформление и шаблон.

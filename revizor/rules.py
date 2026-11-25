@@ -1,0 +1,334 @@
+"""Детерминированные проверки без LLM.
+
+Правила общие для любых ТЗ (не подогнаны под конкретный документ):
+язык требований (29148 п. 5.2.7), незаполненные шаблоны и пустые разделы,
+смешение денежных единиц, семантика HTTP-методов и кодов ответа, расхождение
+типов параметров API, идентификаторы в строке запроса.
+"""
+
+from __future__ import annotations
+
+import re
+from collections import defaultdict
+from dataclasses import dataclass, field
+
+from .document import Document
+from .schemas import Evidence
+from .verify import QuoteLocator, clean_line
+
+
+@dataclass
+class RuleHit:
+    rule: str
+    criterion: str
+    severity: str
+    title: str
+    problem: str
+    recommendation: str
+    evidence: list[Evidence] = field(default_factory=list)
+
+
+def _w(pattern: str) -> re.Pattern:
+    return re.compile(rf"(?<![\w-])(?:{pattern})(?![\w-])", re.I)
+
+
+# --- 29148 п. 5.2.7: субъективные, размытые и незамкнутые формулировки
+VAGUE = {
+    "неизмеримое время": _w(r"быстр\w*|оперативн\w*|своевременн\w*|мгновенн\w*|немедленн\w*|сразу|в момент|в реальном времени|как можно скорее"),
+    "субъективная оценка": _w(r"удобн\w*|интуитивн\w*|дружелюбн\w*|простой|просто|легко|понятн\w*|красив\w*|современн\w*"),
+    "неизмеримое качество": _w(r"достаточн\w*|приемлем\w*|разумн\w*|оптимальн\w*|эффективн\w*|надёжн\w*|надежн\w*|гибк\w*|высок\w* (?:производительн\w*|доступн\w*|качеств\w*)"),
+    "лазейка": _w(r"при необходимости|по возможности|если возможно|как правило|обычно|в основном|по усмотрению|желательно"),
+    "незамкнутое перечисление": _w(r"и т\.\s?д\.?|и т\.\s?п\.?|и др\.|и прочее|и тому подобное|и так далее|и далее|в том числе|включая,? но не ограничиваясь"),
+    "неопределённое количество": _w(r"несколько|некотор\w*|многие|много|мало|около|примерно|порядка|большое количество"),
+    "неоднозначная связка": _w(r"и/или"),
+    "неопределённая ссылка": _w(r"соответствующ\w*|вышеуказанн\w*|вышеперечисленн\w*|данный|этот|оный"),
+}
+# слова, которые часто встречаются в нейтральном смысле — считаем только в требованиях
+_WEAK = {"неопределённая ссылка"}
+
+PLACEHOLDER = [
+    (re.compile(r"\b(TBD|TBA|TODO|FIXME|XXX)\b"), "маркер «не определено»"),
+    (re.compile(r"заполня\w+ (позже|тестировщик\w*|аналитик\w*|разработчик\w*)|будет (заполнен|определ\w+|уточн\w+)|уточняется|не заполнен\w*", re.I), "раздел не заполнен"),
+    (re.compile(r"Да\s*/\s*Нет"), "неотмеченный вариант шаблона «Да / Нет»"),
+]
+_EMPTY_ROW = re.compile(r"^\|(\s*\|)+\s*$")
+_DASH_CELL = re.compile(r"^\|\s*\**[^|]+?\**\s*\|\s*[—–-]\s*\|\s*$")
+_PROD_DASH = re.compile(r"\b(Prod|Production|Прод)\w*\s*:\s*[—–-]", re.I)
+
+_MINOR_UNIT = _w(r"тиын\w*|тийын\w*|копе\w*|цент\w*|minor units?")
+_MAJOR_UNIT = re.compile(r"(?<![\w-])(тенге|рубл\w*|доллар\w*)(?![\w-])|₸|\bKZT\b|\bRUB\b|\bUSD\b", re.I)
+
+_HTTP_METHOD = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\b")
+_MUTATING_URL = re.compile(r"/[\w/{}-]*(save|update|create|delete|remove|set|add|edit|change)\w*", re.I)
+_MUTATING_WORD = re.compile(r"сохранен\w*|сохранить|изменен\w*|изменить|удален\w*|удалить|создан\w*|создать|заменить", re.I)
+_SENSITIVE_PARAM = re.compile(r"card|pan|account|iin|иин|phone|passport|token|password|cvv|iban", re.I)
+_HTTP_CODE = re.compile(r"(?<![\d\s])(?<!\d )\b([1-5]\d\d)\b(?![\s ]?\d{3})")
+
+
+def _is_table_sep(t: str) -> bool:
+    return bool(re.match(r"^\|?\s*:?-{2,}", t.strip()))
+
+
+def _cells(t: str) -> list[str]:
+    return [re.sub(r"[*`]", "", c).strip() for c in t.strip().strip("|").split("|")]
+
+
+def check_language(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    by_kind: dict[str, list[tuple[int, str]]] = defaultdict(list)
+    for ln in doc.lines:
+        t = ln.text
+        if not t.strip() or t.lstrip().startswith("#") or _is_table_sep(t) or t.strip().startswith("```"):
+            continue
+        for kind, rx in VAGUE.items():
+            if kind in _WEAK:
+                continue
+            for m in rx.finditer(t):
+                by_kind[kind].append((ln.no, m.group(0)))
+    hits = []
+    for kind, items in by_kind.items():
+        for no, word in items:
+            hits.append(
+                RuleHit(
+                    rule="R-LANG",
+                    criterion="language",
+                    severity="major" if kind in ("неизмеримое время", "незамкнутое перечисление", "лазейка") else "minor",
+                    title=f"Размытая формулировка: «{word}» ({kind})",
+                    problem=(
+                        f"Слово «{word}» относится к категории «{kind}» (ISO/IEC/IEEE 29148, п. 5.2.7): "
+                        "оно не задаёт измеримого и однозначного условия, поэтому разные участники "
+                        "поймут его по-разному, а проверить выполнение объективно нельзя."
+                    ),
+                    recommendation="Заменить на измеримое условие: точное значение, границу, перечень или момент времени.",
+                    evidence=[loc.line_evidence(no)],
+                )
+            )
+    return hits
+
+
+def check_placeholders(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    grouped: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for ln in doc.lines:
+        t = ln.text
+        if _is_table_sep(t):
+            continue
+        for rx, kind in PLACEHOLDER:
+            if rx.search(t):
+                grouped[(ln.section, kind)].append(ln.no)
+                break
+        else:
+            if _EMPTY_ROW.match(t.strip()):
+                grouped[(ln.section, "пустая строка таблицы (не заполнено)")].append(ln.no)
+            elif _DASH_CELL.match(t.strip()) or _PROD_DASH.search(t):
+                grouped[(ln.section, "значение поля не указано («—»)")].append(ln.no)
+    hits = []
+    for (section, kind), lines in grouped.items():
+        evid = [loc.line_evidence(n) for n in lines[:3]]
+        for e in evid:
+            if not e.quote:
+                e.quote = "(пустая строка таблицы)"
+        hits.append(
+            RuleHit(
+                rule="R-PLACEHOLDER",
+                criterion="set_complete" if kind != "значение поля не указано («—»)" else "conforming",
+                severity="minor" if "Да / Нет" in kind else "major",
+                title=f"Незаполненный шаблон: {kind}" + (f" — {len(lines)} мест" if len(lines) > 1 else ""),
+                problem=(
+                    f"В разделе «{section or 'без раздела'}» обнаружено: {kind} "
+                    f"({len(lines)} шт.). Документ в таком виде нельзя считать завершённым: "
+                    "информация, которую должен дать шаблон, отсутствует."
+                ),
+                recommendation="Заполнить раздел или явно указать «не применимо» с обоснованием.",
+                evidence=evid,
+            )
+        )
+    return hits
+
+
+def check_empty_sections(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    hits = []
+    heads = [(ln.no, len(m.group(1))) for ln in doc.lines if (m := re.match(r"^(#{1,6})\s", ln.text))]
+    for i, (no, level) in enumerate(heads):
+        nxt_no, nxt_level = heads[i + 1] if i + 1 < len(heads) else (len(doc.lines) + 1, 0)
+        if nxt_level > level:
+            continue  # есть подразделы
+        body = [doc.line(n).text for n in range(no + 1, nxt_no) if doc.line(n)]
+        if not any(t.strip() and t.strip() != "---" for t in body):
+            hits.append(
+                RuleHit(
+                    rule="R-EMPTY", criterion="set_complete", severity="major",
+                    title="Пустой раздел",
+                    problem="Раздел объявлен в документе, но не содержит ни одного требования или описания.",
+                    recommendation="Заполнить раздел или удалить его с пометкой «не применимо».",
+                    evidence=[loc.line_evidence(no)],
+                )
+            )
+    return hits
+
+
+def check_money_units(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    minor = [ln.no for ln in doc.lines if _MINOR_UNIT.search(ln.text)]
+    major = [ln.no for ln in doc.lines if _MAJOR_UNIT.search(ln.text) and not _is_table_sep(ln.text)]
+    if not minor or not major:
+        return []
+    # в первую очередь показываем строки, где обе единицы встречаются рядом (одна сущность)
+    both = [n for n in minor if _MAJOR_UNIT.search(doc.line(n).text)]
+    evid_lines = (both or minor[:1]) + [n for n in major if n not in both][:1]
+    return [
+        RuleHit(
+            rule="R-UNITS", criterion="consistent", severity="major",
+            title="Денежные величины заданы в разных единицах",
+            problem=(
+                "Часть сумм задана в мелких единицах (тиын/копейки), часть — в основных (тенге/₸). "
+                "Без явного правила пересчёта и округления сравнение суммы с порогом может дать "
+                "ошибку в 100 раз или на границе."
+            ),
+            recommendation="Зафиксировать единую единицу хранения и сравнения (например, тиын, целое) и правило конвертации.",
+            evidence=[loc.line_evidence(n) for n in evid_lines[:3]],
+        )
+    ]
+
+
+def check_http(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    hits = []
+    method_lines = [ln for ln in doc.lines if re.search(r"(REST type|Method|Метод)", ln.text, re.I) and _HTTP_METHOD.search(ln.text)]
+    for ml in method_lines:
+        method = _HTTP_METHOD.search(ml.text).group(1)
+        if method != "GET":
+            continue
+        # ищем признаки изменения состояния в том же разделе API
+        scope = [ln for ln in doc.lines if ln.section.split(" › ")[0] == ml.section.split(" › ")[0]]
+        mut = [ln for ln in scope if _MUTATING_URL.search(ln.text) or (
+            re.search(r"Description|Описание|Назначение", ln.text, re.I) and _MUTATING_WORD.search(ln.text))]
+        if mut:
+            hits.append(
+                RuleHit(
+                    rule="R-HTTP-GET", criterion="appropriate", severity="critical",
+                    title="GET используется для изменяющей операции",
+                    problem=(
+                        "Метод GET по HTTP-семантике безопасен и идемпотентен: его кэшируют прокси, "
+                        "повторяют браузеры и сканеры, параметры попадают в логи и историю. "
+                        "Изменение настроек через GET приводит к непреднамеренным сохранениям и утечке параметров."
+                    ),
+                    recommendation="Использовать POST/PUT (или PATCH) с телом запроса; GET оставить только для чтения.",
+                    evidence=[loc.line_evidence(ml.no)] + [loc.line_evidence(m.no) for m in mut[:2]],
+                )
+            )
+        body = [ln for ln in scope if re.search(r"Content-Type", ln.text, re.I) and "json" in ln.text.lower()]
+        if body:
+            hits.append(
+                RuleHit(
+                    rule="R-HTTP-BODY", criterion="consistent", severity="minor",
+                    title="Для GET-запроса указан Content-Type тела",
+                    problem="У GET-запроса нет тела, поэтому указание Content-Type запроса противоречит выбранному методу.",
+                    recommendation="Убрать Content-Type запроса или сменить метод на POST/PUT с JSON-телом.",
+                    evidence=[loc.line_evidence(body[0].no)],
+                )
+            )
+    return hits
+
+
+def check_status_codes(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    described: set[str] = set()
+    mentioned: dict[str, int] = {}
+    for ln in doc.lines:
+        t = ln.text.strip()
+        m = re.match(r"^(?:#{1,6}\s*|\*\*)\s*([1-5]\d\d)\b", t)
+        if m:
+            described.add(m.group(1))
+            continue
+        if re.search(r"Ответ|Статус|Status|Response|Код", ln.section, re.I) and not t.startswith(("{", "|", "`")):
+            for code in re.findall(r"\b([1-5]\d\d)\b", t):
+                if re.search(r"результат|статус|код|возвращ|ответ|status|code", t, re.I):
+                    mentioned.setdefault(code, ln.no)
+    hits = []
+    for code, no in sorted(mentioned.items()):
+        if code not in described:
+            hits.append(
+                RuleHit(
+                    rule="R-HTTP-CODE", criterion="complete", severity="major",
+                    title=f"Код ответа {code} упомянут, но не описан",
+                    problem=f"Код {code} фигурирует в тексте, но для него нет описания ситуации и примера ответа.",
+                    recommendation=f"Описать, когда возвращается {code}, и привести пример тела ответа — или убрать упоминание.",
+                    evidence=[loc.line_evidence(no)],
+                )
+            )
+    return hits
+
+
+def check_api_tables(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    """Тип одного и того же параметра в разных таблицах API; чувствительные данные в query."""
+    formats: dict[str, dict[str, int]] = defaultdict(dict)
+    sensitive: list[tuple[int, str]] = []
+    header: list[str] | None = None
+    for ln in doc.lines:
+        t = ln.text.strip()
+        if not t.startswith("|"):
+            header = None
+            continue
+        if _is_table_sep(t):
+            continue
+        cells = _cells(t)
+        low = [c.lower() for c in cells]
+        if header is None:
+            header = low
+            continue
+        if "parameter" in header or "параметр" in header:
+            pi = header.index("parameter") if "parameter" in header else header.index("параметр")
+            fi = next((i for i, h in enumerate(header) if h in ("format", "тип", "формат", "type")), None)
+            if pi < len(cells) and cells[pi]:
+                name = cells[pi]
+                if fi is not None and fi < len(cells) and cells[fi]:
+                    formats[name].setdefault(cells[fi].lower(), ln.no)
+                if re.search(r"query", ln.section, re.I) and _SENSITIVE_PARAM.search(name):
+                    sensitive.append((ln.no, name))
+    hits = []
+    for name, fmts in formats.items():
+        if len(fmts) > 1:
+            hits.append(
+                RuleHit(
+                    rule="R-API-TYPE", criterion="consistent", severity="major",
+                    title=f"Параметр «{name}» имеет разные типы: {', '.join(fmts)}",
+                    problem=(
+                        f"Один и тот же параметр «{name}» описан с разными форматами ({', '.join(fmts)}). "
+                        "Клиент и сервер по-разному сериализуют значение, что ведёт к ошибкам парсинга и сравнения."
+                    ),
+                    recommendation="Привести формат параметра к одному типу во всех таблицах запроса и ответа.",
+                    evidence=[loc.line_evidence(n) for n in list(fmts.values())[:3]],
+                )
+            )
+    for no, name in sensitive:
+        hits.append(
+            RuleHit(
+                rule="R-API-QUERY-PII", criterion="risk", severity="major",
+                title=f"Идентификатор «{name}» передаётся в строке запроса",
+                problem=(
+                    "Параметры строки запроса сохраняются в логах веб-серверов, прокси, APM и истории — "
+                    "идентификаторы карт/счетов/клиентов в URL создают риск утечки."
+                ),
+                recommendation="Передавать идентификатор в теле запроса или в пути с маскированием в логах; описать требования к логированию.",
+                evidence=[loc.line_evidence(no)],
+            )
+        )
+    return hits
+
+
+ALL_RULES = [
+    check_language,
+    check_placeholders,
+    check_empty_sections,
+    check_money_units,
+    check_http,
+    check_status_codes,
+    check_api_tables,
+]
+
+
+def run_rules(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    hits: list[RuleHit] = []
+    for rule in ALL_RULES:
+        hits.extend(rule(doc, loc))
+    for h in hits:
+        for e in h.evidence:
+            if not e.quote:
+                e.quote = clean_line(doc.line(e.line_start).text) if e.line_start else ""
+    return hits
