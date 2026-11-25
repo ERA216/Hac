@@ -66,7 +66,7 @@ def rule_segments(doc: Document, line_range: tuple[int, int] | None = None) -> l
         is_table = t.startswith("|")
         if not is_table:
             prev_table, table_row = False, 0
-        if in_code or not t or t == "---" or _HEADING.match(t) or SKIP_SECTION.search(ln.section):
+        if in_code or not t or t == "---" or ln.heading or _HEADING.match(t) or SKIP_SECTION.search(ln.section):
             continue
         if is_table:
             if re.match(r"^\|?\s*:?-{2,}", t):

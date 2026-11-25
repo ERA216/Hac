@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import tempfile
 import threading
 from pathlib import Path
@@ -99,7 +100,24 @@ def make_llm(box):
     )
 
 
+def key_problem() -> str | None:
+    """Нет ключа Gemini и не включён режим «только кэш» — объясняем сразу, а не после минуты ожидания."""
+    if replay or os.getenv("LLM_PROVIDER", "gemini") != "gemini":
+        return None
+    key = os.getenv("GEMINI_API_KEY", "")
+    if not key or key.startswith("your_"):
+        return (
+            "Не задан ключ GEMINI_API_KEY. Скопируйте .env.example в .env, впишите ключ из "
+            "https://aistudio.google.com/ и перезапустите интерфейс. Без ключа включите «Только кэш (без сети)» "
+            "и возьмите пример ТЗ хакатона."
+        )
+    return None
+
+
 if st.button("Проверить документ", type="primary", disabled=not doc_path):
+    if (problem := key_problem()) is not None:
+        st.error(problem)
+        st.stop()
     with st.status("Агенты анализируют документ…", expanded=True) as box:
         try:
             doc = load_document(doc_path)

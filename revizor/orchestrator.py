@@ -27,7 +27,7 @@ from .agents import (
 from .agents.context import full_findings, questions_answers, requirements_table, short_findings
 from .criteria import CRITERIA
 from .document import Document
-from .llm import BudgetExceeded, CacheMiss, LLMClient, LLMError, QuotaExhausted
+from .llm import BudgetExceeded, CacheMiss, FatalLLMError, LLMClient, LLMError, QuotaExhausted
 from .rules import run_rules
 from .segmentation import chunk_ranges, numbered_range, rule_segments
 from .schemas import (
@@ -45,6 +45,12 @@ from .schemas import (
 from .verify import QuoteLocator, clean_line, dedupe_evidence
 
 ALMATY = timezone(timedelta(hours=5), "Алматы")
+# обоснование, противоречащее статусу «закрыт уточнением»
+_NOT_RESOLVED = re.compile(
+    r"не\s+(?:уточня|снима|закрыва|устраня|отвеча\w*\s+на|определя|решает|покрыва)|"
+    r"оста[её]тся\s+(?:открыт|неопредел|нерешён|нерешен)|по-прежнему\s+не|частично",
+    re.I,
+)
 SEV_ORDER = {"critical": 0, "major": 1, "minor": 2}
 
 
@@ -145,6 +151,9 @@ class Pipeline:
         try:
             note = fn() or ""
             ok = True
+        except FatalLLMError:
+            self.progress.warn(f"{title}: прогон остановлен")
+            raise  # неверный ключ, нет доступа, сервер модели не запущен — продолжать бессмысленно
         except (QuotaExhausted, BudgetExceeded, CacheMiss) as e:
             note, ok = f"не выполнен: {e}", False
             if required:
@@ -214,6 +223,10 @@ class Pipeline:
         def segment():
             # длинный документ режем на части по заголовкам; если LLM недоступна — нарезка по структуре
             chunks = chunk_ranges(doc, self.segment_chunk_chars)
+            # бюджет вызовов — страховка от зацикливания: длинному документу нужно больше вызовов нарезчика
+            needed = len(chunks) + 8  # части + 4 ревьюера + согласованность + судья + уточнения + перепроверка
+            if self.llm.max_calls < needed:
+                self.llm.max_calls = needed
             items, by_rules = [], []
             for n, (a, b) in enumerate(chunks, start=1):
                 ctx = dict(base_ctx)
@@ -222,6 +235,8 @@ class Pipeline:
                     ctx["part"] = f"часть {n} из {len(chunks)} (строки {a}–{b}); выдели требования только из этой части"
                 try:
                     items.extend(SegmenterAgent(self.llm).call(**ctx).requirements)
+                except FatalLLMError:
+                    raise
                 except LLMError as e:
                     by_rules.append(f"{a}–{b}")
                     items.extend(rule_segments(doc, (a, b)))
@@ -289,6 +304,8 @@ class Pipeline:
                     **base_ctx, requirements=reqs_text, rule_findings=rule_findings, max_findings=self.max_findings
                 )
                 return out, None, round(time.monotonic() - t0, 1)
+            except FatalLLMError:
+                raise
             except LLMError as e:
                 return None, e, round(time.monotonic() - t0, 1)
 
@@ -529,13 +546,17 @@ class Pipeline:
             **base_ctx, requirements=reqs_text, qa=questions_answers(answered), findings=full_findings(affected)
         )
         by_id = {f.fid: f for f in state.findings}
-        changed = 0
+        changed = downgraded = 0
         for s in out.statuses:
             f = by_id.get(s.finding_id)
             if f and s.finding_id in affected_ids:
-                f.status = s.status
-                f.status_comment = s.comment.strip()
-                changed += s.status != "open"
+                status, comment = s.status, s.comment.strip()
+                # статус должен совпадать с обоснованием: «закрыт», но «ответ не уточняет» — значит открыт
+                if status == "resolved" and _NOT_RESOLVED.search(comment):
+                    status, downgraded = "open", downgraded + 1
+                    comment = "Ответ не снимает дефект полностью. " + comment
+                f.status, f.status_comment = status, comment
+                changed += status != "open"
         added = 0
         for nf in out.new_findings:
             f = self._from_out(state, loc, nf, "recheck")
@@ -544,4 +565,5 @@ class Pipeline:
                 f.fid = f"D-{len(state.findings) + 1:02d}"
                 state.findings.append(f)
                 added += 1
-        return f"закрыто/изменено {changed} из {len(affected)} затронутых дефектов, новых: {added}"
+        note = f"закрыто/изменено {changed} из {len(affected)} затронутых дефектов, новых: {added}"
+        return note + (f"; возвращено в открытые (обоснование противоречило статусу): {downgraded}" if downgraded else "")

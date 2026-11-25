@@ -40,6 +40,28 @@ class CacheMiss(LLMError):
     pass
 
 
+class FatalLLMError(LLMError):
+    """Ошибка настройки (неверный ключ, нет доступа, сервер модели не запущен).
+
+    Продолжать прогон бессмысленно: оркестратор останавливается с понятным сообщением,
+    а не выпускает отчёт, собранный одними правилами.
+    """
+
+
+def _fatal_reason(err: Exception) -> str | None:
+    import urllib.error
+
+    s = str(err)
+    code = _status(err)
+    if re.search(r"API_KEY_INVALID|API key not valid|API key expired|invalid[_ ]api[_ ]key|Incorrect API key", s, re.I) or code == 401:
+        return "ключ API недействителен или просрочен — проверьте GEMINI_API_KEY / OPENAI_API_KEY в .env"
+    if isinstance(err, urllib.error.URLError) and not isinstance(err, urllib.error.HTTPError):
+        reason = getattr(err, "reason", None)
+        if isinstance(reason, ConnectionRefusedError) or re.search(r"refused|10061|actively refused", str(reason), re.I):
+            return "сервер модели не отвечает (соединение отклонено) — запустите Ollama или проверьте OLLAMA_BASE_URL"
+    return None
+
+
 @dataclass
 class CallRecord:
     agent: str
@@ -112,6 +134,8 @@ def _unavailable_reason(err: Exception) -> str | None:
     code = _status(err)
     if code == 404:
         return "модель не найдена"
+    if code == 403 or "PERMISSION_DENIED" in str(err):
+        return "нет доступа к модели"
     if code == 503 or re.search(r"high demand|overloaded|UNAVAILABLE", str(err)):
         return "модель перегружена (503)"
     if code == 429 and _is_daily_quota(err):
@@ -459,7 +483,16 @@ class LLMClient:
                 text, meta = backend.complete(system, user, schema)
                 return text, meta, attempts
             except Exception as err:  # noqa: BLE001 — решаем ниже, повторять ли
+                fatal = _fatal_reason(err)
+                if fatal:
+                    raise FatalLLMError(f"{backend.model}: {fatal}.") from err
                 reason = _unavailable_reason(err)
+                if reason == "нет доступа к модели" and not self._switch_model(reason, used_model):
+                    raise FatalLLMError(
+                        f"{backend.model}: нет доступа к модели (403) — проверьте ключ и права проекта."
+                    ) from err
+                if reason == "нет доступа к модели":
+                    continue
                 if reason:
                     # перегрузку сначала пережидаем коротко, затем идём к резервной модели
                     if reason.startswith("модель перегружена") and overloaded < 2:
@@ -474,6 +507,11 @@ class LLMClient:
                         raise QuotaExhausted(
                             f"Исчерпана дневная квота модели {backend.model} и резервных моделей. "
                             "Укажите другую модель (--model) или используйте кэш (--replay)."
+                        ) from err
+                    if reason == "модель не найдена":  # ни одна модель из цепочки не существует — это настройка
+                        raise FatalLLMError(
+                            f"{backend.model}: модель не найдена, резервных нет — проверьте имя модели "
+                            "(список: python -m revizor --list-models)."
                         ) from err
                     raise LLMError(f"{backend.model}: {reason}; резервные модели тоже недоступны.") from err
                 if not backend.retryable(err) or attempts >= 6:

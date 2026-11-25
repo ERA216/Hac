@@ -34,6 +34,7 @@ class Line:
     text: str
     page: int | None = None
     section: str = ""
+    heading: bool = False  # строка — заголовок раздела (markdown или распознанный: «2.1 …», ЗАГЛАВНЫЕ, жирный)
 
 
 @dataclass
@@ -78,27 +79,71 @@ def _clean_heading(text: str) -> str:
     return re.sub(r"[*_`]", "", text).strip()
 
 
+_NUM_HEAD = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,3})\.?\s+([A-ZА-ЯЁ«\"].{1,90})$")
+_CAPS_HEAD = re.compile(r"^[A-ZА-ЯЁ0-9 ,:«»\"()\-–—/]{4,90}$")
+
+
+def _num_key(t: str) -> tuple[int, int] | None:
+    """(глубина, последний номер) для «2.3 Текст» → (2, 3); не нумерованная строка → None."""
+    m = re.match(r"^\s*(\d{1,2}(?:\.\d{1,2}){0,3})[.)]?\s", t)
+    if not m:
+        return None
+    parts = m.group(1).split(".")
+    return len(parts), int(parts[-1])
+
+
+def _implicit_headings(texts: list[str]) -> dict[int, tuple[int, str]]:
+    """Заголовки без markdown-разметки (TXT, DOCX без стилей, вставленный текст).
+
+    «1. Общие сведения», «2.1 Начисление» — нумерованный заголовок, если соседние непустые строки
+    не являются пунктами того же уровня (иначе это нумерованный список). Строка ЗАГЛАВНЫМИ — заголовок.
+    """
+    nonempty = [i for i, t in enumerate(texts) if t.strip()]
+    found: dict[int, tuple[int, str]] = {}
+    for k, i in enumerate(nonempty):
+        t = texts[i].strip()
+        if t.startswith(("|", "-", "*", "#")):
+            continue
+        m = _NUM_HEAD.match(t)
+        if m and not re.search(r"[.;:,!?]$", t):
+            depth, num = _num_key(t)
+            prev = _num_key(texts[nonempty[k - 1]]) if k > 0 else None
+            nxt = _num_key(texts[nonempty[k + 1]]) if k + 1 < len(nonempty) else None
+            # пункт списка — если сосед того же уровня продолжает нумерацию подряд (1 → 2)
+            in_list = (prev is not None and prev == (depth, num - 1)) or (nxt is not None and nxt == (depth, num + 1))
+            if not in_list:
+                found[i] = (min(depth + 1, 6), t)
+                continue
+        letters = re.sub(r"[^A-Za-zА-Яа-яЁё]", "", t)
+        if _CAPS_HEAD.match(t) and len(letters) >= 4 and letters.isupper():
+            found[i] = (1 if k == 0 else 2, t)
+    return found
+
+
 def _build(path: Path, fmt: str, raw: bytes, chunks: list[tuple[int | None, str]]) -> Document:
     lines: list[Line] = []
     stack: list[tuple[int, str]] = []
     title = ""
+    prepared: list[tuple[int | None, str]] = []
     for page, text in chunks:
-        split = []
         for raw_line in text.splitlines():
             t = re.sub(r"<br\s*/?>", " ", raw_line.rstrip()).replace(" ", " ").replace(" ", " ")
-            split.extend(_split_glued(t))
-        for t in split:
-            m = _HEADING.match(t.strip())
-            if m:
-                level, name = len(m.group(1)), _clean_heading(m.group(2))
-                while stack and stack[-1][0] >= level:
-                    stack.pop()
-                stack.append((level, name))
-                if not title and level == 1:
-                    title = name
-            # H1 обычно совпадает с названием документа — в путь раздела не включаем
-            section = " › ".join(name for lvl, name in stack if not (lvl == 1 and name == title))
-            lines.append(Line(no=len(lines) + 1, text=t, page=page, section=section))
+            prepared.extend((page, part) for part in _split_glued(t))
+    has_md = any(_HEADING.match(t.strip()) for _, t in prepared)
+    implicit = {} if has_md else _implicit_headings([t for _, t in prepared])
+    for idx, (page, t) in enumerate(prepared):
+        m = _HEADING.match(t.strip())
+        head = (len(m.group(1)), m.group(2)) if m else implicit.get(idx)
+        if head:
+            level, name = head[0], _clean_heading(head[1])
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            stack.append((level, name))
+            if not title and level == 1:
+                title = name
+        # H1 обычно совпадает с названием документа — в путь раздела не включаем
+        section = " › ".join(name for lvl, name in stack if not (lvl == 1 and name == title))
+        lines.append(Line(no=len(lines) + 1, text=t, page=page, section=section, heading=bool(head)))
     if not title:
         first = next((ln.text for ln in lines if ln.text.strip()), path.stem)
         title = _clean_heading(first.lstrip("# "))[:120]
@@ -155,6 +200,8 @@ def _load_docx(path: Path) -> list[tuple[int | None, str]]:
 
     d = docx.Document(str(path))
     out: list[str] = []
+    bold_lines: list[int] = []  # короткие абзацы целиком жирным — заголовки в документах без стилей
+    styled_headings = False
     for child in d.element.body.iterchildren():
         tag = child.tag.rsplit("}", 1)[-1]
         if tag == "p":
@@ -163,17 +210,25 @@ def _load_docx(path: Path) -> list[tuple[int | None, str]]:
             style = (p.style.name or "").lower() if p.style is not None else ""
             m = re.search(r"(heading|заголовок)\s*(\d)", style)
             if m and text:
+                styled_headings = True
                 out.append("#" * int(m.group(2)) + " " + text)
             elif style == "title" and text:
+                styled_headings = True
                 out.append("# " + text)
             elif "list" in style and text:
                 out.append("* " + text)
             else:
+                runs = [r for r in p.runs if r.text.strip()]
+                if runs and all(r.bold for r in runs) and len(text) <= 90 and not re.search(r"[.;:,!?]$", text):
+                    bold_lines.append(len(out))
                 out.append(text)
         elif tag == "tbl":
             out.append("")
             out.extend(_docx_table(Table(child, d)))
             out.append("")
+    if not styled_headings:
+        for i in bold_lines:
+            out[i] = "## " + out[i]
     return [(None, "\n".join(out))]
 
 

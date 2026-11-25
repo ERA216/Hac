@@ -61,7 +61,13 @@ _MAJOR_UNIT = re.compile(r"(?<![\w-])(тенге|рубл\w*|доллар\w*)(?!
 _HTTP_METHOD = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\b")
 _MUTATING_URL = re.compile(r"/[\w/{}-]*(save|update|create|delete|remove|set|add|edit|change)\w*", re.I)
 _MUTATING_WORD = re.compile(r"сохранен\w*|сохранить|изменен\w*|изменить|удален\w*|удалить|создан\w*|создать|заменить", re.I)
-_SENSITIVE_PARAM = re.compile(r"card|pan|account|iin|иин|phone|passport|token|password|cvv|iban", re.I)
+_SENSITIVE_PARAM = re.compile(
+    r"card|\bpan\b|account|iin|иин|phone|телефон|passport|паспорт|token|password|cvv|iban|e-?mail|fio|фио|birth|snils|inn\b",
+    re.I,
+)
+_NAME_COLS = {"parameter", "параметр", "поле", "field", "name", "имя", "атрибут", "attribute", "наименование", "название"}
+_TYPE_COLS = {"format", "тип", "формат", "type", "тип данных", "data type", "datatype"}
+_LOCATION_COLS = {"in", "где", "расположение", "location", "место", "передача", "источник"}
 _HTTP_CODE = re.compile(r"(?<![\d\s])(?<!\d )\b([1-5]\d\d)\b(?![\s ]?\d{3})")
 
 
@@ -77,7 +83,7 @@ def check_language(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     by_kind: dict[str, list[tuple[int, str]]] = defaultdict(list)
     for ln in doc.lines:
         t = ln.text
-        if not t.strip() or t.lstrip().startswith("#") or _is_table_sep(t) or t.strip().startswith("```"):
+        if not t.strip() or ln.heading or t.lstrip().startswith("#") or _is_table_sep(t) or t.strip().startswith("```"):
             continue
         for kind, rx in VAGUE.items():
             if kind in _WEAK:
@@ -146,13 +152,36 @@ def check_placeholders(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
 
 def check_empty_sections(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     hits = []
-    heads = [(ln.no, len(m.group(1))) for ln in doc.lines if (m := re.match(r"^(#{1,6})\s", ln.text))]
+    heads = []
+    for ln in doc.lines:
+        m = re.match(r"^(#{1,6})\s", ln.text)
+        if m:
+            heads.append((ln.no, len(m.group(1))))
+        elif ln.heading:  # распознанный заголовок без разметки: уровень по глубине нумерации
+            num = re.match(r"^\s*(\d+(?:\.\d+)*)", ln.text)
+            heads.append((ln.no, (num.group(1).count(".") + 2) if num else 2))
+    empty: list[tuple[int, int]] = []
     for i, (no, level) in enumerate(heads):
         nxt_no, nxt_level = heads[i + 1] if i + 1 < len(heads) else (len(doc.lines) + 1, 0)
         if nxt_level > level:
             continue  # есть подразделы
         body = [doc.line(n).text for n in range(no + 1, nxt_no) if doc.line(n)]
+        title = re.sub(r"^#{1,6}\s*|[*_`]", "", doc.line(no).text).strip()
+        if re.match(r"^[1-5]\d\d\b", title):
+            continue  # «#### 200. Лимит сохранён» — заголовок и есть описание кода ответа
         if not any(t.strip() and t.strip() != "---" for t in body):
+            empty.append((i, no))
+    # три и более пустых заголовка подряд одного уровня — это список, оформленный заголовками
+    runs: list[list[tuple[int, int]]] = []
+    for item in empty:
+        if runs and item[0] == runs[-1][-1][0] + 1 and heads[item[0]][1] == heads[runs[-1][-1][0]][1]:
+            runs[-1].append(item)
+        else:
+            runs.append([item])
+    for run in runs:
+        if len(run) >= 3:
+            continue
+        for _, no in run:
             hits.append(
                 RuleHit(
                     rule="R-EMPTY", criterion="set_complete", severity="major",
@@ -190,7 +219,11 @@ def check_money_units(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
 
 def check_http(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     hits = []
-    method_lines = [ln for ln in doc.lines if re.search(r"(REST type|Method|Метод)", ln.text, re.I) and _HTTP_METHOD.search(ln.text)]
+    method_lines = [
+        ln for ln in doc.lines
+        if (re.search(r"REST type|Method|Метод|Тип запроса|HTTP[- ]метод|Verb", ln.text, re.I) and _HTTP_METHOD.search(ln.text))
+        or re.match(r"^\s*[*`]*(GET|POST|PUT|PATCH|DELETE)[*`]*\s+`?/[\w/{}.-]+", ln.text)  # «GET /transfers/create»
+    ]
     for ml in method_lines:
         method = _HTTP_METHOD.search(ml.text).group(1)
         if method != "GET":
@@ -272,15 +305,23 @@ def check_api_tables(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
         if header is None:
             header = low
             continue
-        if "parameter" in header or "параметр" in header:
-            pi = header.index("parameter") if "parameter" in header else header.index("параметр")
-            fi = next((i for i, h in enumerate(header) if h in ("format", "тип", "формат", "type")), None)
+        pi = next((i for i, h in enumerate(header) if h in _NAME_COLS or h.startswith("param")), None)
+        if pi is not None:
+            fi = next((i for i, h in enumerate(header) if h in _TYPE_COLS), None)
+            li = next((i for i, h in enumerate(header) if h in _LOCATION_COLS), None)
             if pi < len(cells) and cells[pi]:
                 name = cells[pi]
                 if fi is not None and fi < len(cells) and cells[fi]:
                     formats[name].setdefault(cells[fi].lower(), ln.no)
-                if re.search(r"query", ln.section, re.I) and _SENSITIVE_PARAM.search(name):
+                in_query = bool(re.search(r"query|строк\w* запроса", ln.section, re.I)) or (
+                    li is not None and li < len(cells) and re.search(r"query|url|строк", cells[li], re.I))
+                if in_query and _SENSITIVE_PARAM.search(name):
                     sensitive.append((ln.no, name))
+    # чувствительные параметры прямо в примерах URL: «?phone=…», «&cardId=…»
+    for ln in doc.lines:
+        for m in re.finditer(r"[?&]([A-Za-z_][\w-]{1,40})=", ln.text):
+            if _SENSITIVE_PARAM.search(m.group(1)) and all(m.group(1) != n for _, n in sensitive):
+                sensitive.append((ln.no, m.group(1)))
     hits = []
     for name, fmts in formats.items():
         if len(fmts) > 1:
@@ -336,7 +377,7 @@ def check_template_sections(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     # заголовком считаем и строку, целиком выделенную жирным (PDF/DOCX часто теряют уровни заголовков)
     heads = [
         (ln.no, _norm_heading(ln.text)) for ln in doc.lines
-        if re.match(r"^#{1,6}\s", ln.text) or re.fullmatch(r"\*\*[^*|]{3,80}\*\*", ln.text.strip())
+        if ln.heading or re.match(r"^#{1,6}\s", ln.text) or re.fullmatch(r"\*\*[^*|]{3,80}\*\*", ln.text.strip())
     ]
     if not heads:
         return []
