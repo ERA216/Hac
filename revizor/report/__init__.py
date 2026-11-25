@@ -100,6 +100,15 @@ def build_context(state: RunState, llm: LLMClient) -> dict:
         "by_criterion": sorted(by_criterion.items(), key=lambda kv: -kv[1]),
         "clean_reqs": clean_reqs,
         "priorities": priorities,
+        "rewrites": [
+            {
+                "f": f,
+                "req": ", ".join(f"{rid} ({reqs[rid].source_id})" if reqs[rid].source_id else rid for rid in f.requirement_ids) or "—",
+                "was": reqs[f.requirement_ids[0]].evidence.quote if f.requirement_ids else (f.evidence[0].quote if f.evidence else ""),
+            }
+            for f in state.open_findings
+            if f.rewrite
+        ],
         "critical": [f for f in state.open_findings if f.severity == "critical"],
         "resolved": [f for f in findings if not f.is_open],
         "llm": llm,
@@ -186,4 +195,32 @@ def write_reports(state: RunState, llm: LLMClient, report_path: Path) -> list[Pa
     json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     html_path = report_path.with_suffix(".html")
     html_path.write_text(render_html(json.loads(json.dumps(data, ensure_ascii=False, default=str)), state.doc), encoding="utf-8")
-    return [report_path, html_path, json_path]
+    return [report_path, html_path, json_path, *write_csv(state, report_path)]
+
+
+def write_csv(state: RunState, report_path: Path) -> list[Path]:
+    """Дефекты и вопросы в CSV (Excel/Jira): разделитель «;», UTF-8 с BOM — открывается в Excel без настроек."""
+    import csv
+
+    priority = {"critical": "Highest", "major": "High", "minor": "Low"}
+    defects_path = report_path.with_name(report_path.stem + ".defects.csv")
+    with defects_path.open("w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.writer(fh, delimiter=";")
+        w.writerow(["ID", "Критичность", "Приоритет Jira", "Критерий", "Источник критерия", "Требования",
+                    "Заголовок", "Проблема", "Что исправить", "Предлагаемая формулировка", "Где в документе", "Цитаты", "Статус"])
+        for f in state.findings:
+            w.writerow([
+                f.fid, SEVERITY_NAMES.get(f.severity, f.severity), priority.get(f.severity, ""), criterion_name(f.criterion),
+                CRITERIA[f.criterion].source if f.criterion in CRITERIA else "", ", ".join(f.requirement_ids), f.title,
+                f.problem, f.recommendation, f.rewrite, "; ".join(e.location for e in f.evidence),
+                " | ".join(e.quote for e in f.evidence), {"open": "открыт", "resolved": "закрыт уточнением", "changed": "изменён"}[f.status],
+            ])
+    questions_path = report_path.with_name(report_path.stem + ".questions.csv")
+    with questions_path.open("w", encoding="utf-8-sig", newline="") as fh:
+        w = csv.writer(fh, delimiter=";")
+        w.writerow(["ID", "Блокирующий", "Кому", "Вопрос", "Варианты ответа", "Зачем", "Дефекты", "Требования", "Ответ"])
+        for q in state.questions:
+            w.writerow([q.qid, "да" if q.blocking else "нет", q.addressee, q.question,
+                        " / ".join(f"{i}. {o}" for i, o in enumerate(q.options, 1)), q.why,
+                        ", ".join(q.finding_ids), ", ".join(q.requirement_ids), q.answer])
+    return [defects_path, questions_path]

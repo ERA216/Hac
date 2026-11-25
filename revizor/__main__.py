@@ -102,8 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("input", nargs="?", help=f"файл требований ({', '.join(sorted(SUPPORTED))})")
     p.add_argument("report", nargs="?", help="путь к отчёту (.md); рядом появятся .html и .json")
-    p.add_argument("--provider", choices=["gemini", "openai"], default=None,
-                   help="провайдер LLM (openai — любой OpenAI-совместимый API, включая Ollama)")
+    p.add_argument("--provider", choices=["gemini", "openai", "ollama"], default=None,
+                   help="провайдер LLM: gemini, openai (любой OpenAI-совместимый API) или ollama (локальная модель)")
     p.add_argument("--model", help="модель (по умолчанию из .env)")
     p.add_argument("--fallback-models", help="резервные модели через запятую (при перегрузке, 404 или исчерпании квоты)")
     p.add_argument("--base-url", help="адрес OpenAI-совместимого API")

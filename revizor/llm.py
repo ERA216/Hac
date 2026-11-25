@@ -238,6 +238,68 @@ class _OpenAICompatible:
         return code == 429 or (isinstance(code, int) and code >= 500)
 
 
+class _Ollama:
+    """Локальная модель через родной API Ollama: размер контекста, JSON-схема, без «размышлений».
+
+    Данные не покидают контур: подходит для ТЗ, которые нельзя отправлять во внешние сервисы.
+    """
+
+    name = "ollama"
+
+    def __init__(self, model: str, base_url: str | None, temperature: float | None, num_ctx: int):
+        self.model = model
+        base = (base_url or "http://localhost:11434").rstrip("/")
+        self.base = base[:-3] if base.endswith("/v1") else base
+        self.temperature = temperature
+        self.num_ctx = num_ctx
+        self.think_param = True
+
+    def complete(self, system: str, user: str, schema: type[BaseModel]) -> tuple[str, dict]:
+        import urllib.error
+        import urllib.request
+
+        options: dict = {"num_ctx": self.num_ctx}
+        if self.temperature is not None:
+            options["temperature"] = self.temperature
+        body = {
+            "model": self.model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "format": inline_schema(schema),
+            "stream": False,
+            "options": options,
+        }
+        if self.think_param:
+            body["think"] = False
+        req = urllib.request.Request(
+            f"{self.base}/api/chat", data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=1800) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:300]
+            if e.code == 400 and self.think_param and "think" in detail.lower():
+                self.think_param = False  # модель не поддерживает параметр think
+                return self.complete(system, user, schema)
+            err = LLMError(f"Ollama {e.code}: {detail}")
+            err.status_code = e.code  # type: ignore[attr-defined]
+            raise err from e
+        meta = {
+            "model_version": data.get("model", self.model),
+            "prompt_tokens": data.get("prompt_eval_count", 0) or 0,
+            "output_tokens": data.get("eval_count", 0) or 0,
+        }
+        return data.get("message", {}).get("content", ""), meta
+
+    @staticmethod
+    def retryable(err: Exception) -> bool:
+        import urllib.error
+
+        code = getattr(err, "status_code", None)
+        return isinstance(err, (urllib.error.URLError, TimeoutError)) or (isinstance(code, int) and code >= 500)
+
+
 # ------------------------------------------------------------------ client
 class LLMClient:
     def __init__(
@@ -255,6 +317,7 @@ class LLMClient:
         on_wait: Callable[[str], None] | None = None,
         fallback_models: list[str] | None = None,
         extra_cache_dirs: list[Path] | None = None,
+        num_ctx: int = 24576,
     ):
         self.provider = provider
         self.model = model
@@ -263,6 +326,7 @@ class LLMClient:
         self.switches: list[str] = []
         self.cache_dir = cache_dir
         self.extra_cache_dirs = [d for d in (extra_cache_dirs or []) if d and d != cache_dir]
+        self.num_ctx = num_ctx  # окно контекста для локальной модели (Ollama)
         self.replay = replay
         self.min_interval = 60.0 / rpm if rpm else 0.0
         self.max_calls = max_calls
@@ -282,6 +346,8 @@ class LLMClient:
                 self._backend = _Gemini(api_key, self.model, temperature, thinking_level)
             elif self.provider == "openai":
                 self._backend = _OpenAICompatible(api_key, self.model, base_url, temperature)
+            elif self.provider == "ollama":
+                self._backend = _Ollama(self.model, base_url, temperature, self.num_ctx)
             else:
                 raise LLMError(f"Неизвестный провайдер: {self.provider}")
         return self._backend
