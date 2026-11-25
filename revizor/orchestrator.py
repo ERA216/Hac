@@ -39,7 +39,7 @@ from .schemas import (
     TraceLinkOut,
     VerdictOut,
 )
-from .verify import QuoteLocator, clean_line
+from .verify import QuoteLocator, clean_line, dedupe_evidence
 
 ALMATY = timezone(timedelta(hours=5), "Алматы")
 SEV_ORDER = {"critical": 0, "major": 1, "minor": 2}
@@ -190,7 +190,7 @@ class Pipeline:
             problem=out.problem.strip(),
             recommendation=out.recommendation.strip(),
             rewrite=out.rewrite.strip(),
-            evidence=evidence,
+            evidence=dedupe_evidence(evidence),
             sources=[source],
         )
 
@@ -355,7 +355,7 @@ class Pipeline:
                     problem=m.problem.strip() or cands[0].problem,
                     recommendation=m.recommendation.strip() or cands[0].recommendation,
                     rewrite=m.rewrite.strip() or next((c.rewrite for c in cands if c.rewrite), ""),
-                    evidence=evidence[:4],
+                    evidence=dedupe_evidence(evidence)[:4],
                     sources=sources,
                     candidate_ids=[c.fid for c in cands],
                     priority=max(0, m.priority),

@@ -22,7 +22,8 @@ from .report import write_reports
 from .schemas import Question
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MODELS = {"gemini": "gemini-flash-latest", "openai": "gpt-4o-mini"}
+DEFAULT_MODELS = {"gemini": "gemini-3.8-flash", "openai": "gpt-4o-mini"}
+DEFAULT_FALLBACKS = {"gemini": "gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-2.5-flash", "openai": ""}
 
 
 class ConsoleProgress:
@@ -100,6 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--provider", choices=["gemini", "openai"], default=os.getenv("LLM_PROVIDER", "gemini"),
                    help="провайдер LLM (openai — любой OpenAI-совместимый API, включая Ollama)")
     p.add_argument("--model", help="модель (по умолчанию из .env)")
+    p.add_argument("--fallback-models", help="резервные модели через запятую (при перегрузке, 404 или исчерпании квоты)")
     p.add_argument("--base-url", default=os.getenv("OPENAI_BASE_URL"), help="адрес OpenAI-совместимого API")
     p.add_argument("--interactive", "-i", action="store_true", help="задать уточняющие вопросы в консоли и перепроверить")
     p.add_argument("--answers", type=Path, help="файл ответов на вопросы (JSON {\"Q-01\": \"…\"} или строки «Q-01: …»)")
@@ -127,9 +129,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.provider == "gemini":
         api_key = os.getenv("GEMINI_API_KEY", "")
         model = args.model or os.getenv("GEMINI_MODEL") or DEFAULT_MODELS["gemini"]
+        fallbacks = args.fallback_models or os.getenv("GEMINI_FALLBACK_MODELS") or DEFAULT_FALLBACKS["gemini"]
     else:
         api_key = os.getenv("OPENAI_API_KEY", "")
         model = args.model or os.getenv("OPENAI_MODEL") or DEFAULT_MODELS["openai"]
+        fallbacks = args.fallback_models or os.getenv("OPENAI_FALLBACK_MODELS") or ""
 
     if args.list_models:
         if args.provider != "gemini":
@@ -157,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
         temperature=float(temperature) if temperature else None,
         thinking_level=os.getenv("GEMINI_THINKING_LEVEL") or None,
         on_wait=lambda msg: console.print(f"[dim]… {msg}[/]"),
+        fallback_models=[m.strip() for m in fallbacks.split(",") if m.strip()],
     )
 
     try:

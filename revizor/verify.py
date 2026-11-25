@@ -75,6 +75,7 @@ class QuoteLocator:
         ev.line_end = max(ev.line_start, self._line_at(max(start, end - 1)))
         ev.score = round(min(f[2] for f in found), 1)
         ev.verified = True
+        ev.quote = clean_line(quote) or quote.strip()  # для отчёта — без markdown-разметки
         ev.location = self.doc.location(ev.line_start, ev.line_end)
         return ev
 
@@ -86,6 +87,21 @@ class QuoteLocator:
             quote=text, line_start=line_no, line_end=line_no, location=self.doc.location(line_no),
             verified=True, score=100.0,
         )
+
+
+def dedupe_evidence(items: list[Evidence]) -> list[Evidence]:
+    """Убирает повторы: одинаковые цитаты и цитаты, вложенные в другую цитату той же строки."""
+    out: list[Evidence] = []
+    for e in sorted(items, key=lambda x: -len(x.quote)):
+        ne = normalize(e.quote)
+        dup = any(
+            o.line_start == e.line_start and (ne in normalize(o.quote) or normalize(o.quote) in ne)
+            for o in out
+        )
+        if not dup:
+            out.append(e)
+    order = {id(e): i for i, e in enumerate(items)}
+    return sorted(out, key=lambda e: order[id(e)])
 
 
 def clean_line(text: str) -> str:

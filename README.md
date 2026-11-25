@@ -67,9 +67,9 @@ python -m revizor examples/requirements.pdf reports/report.md --answers reports/
 
 | Что | Значение |
 | :--- | :--- |
-| По умолчанию | Google Gemini, `gemini-flash-latest` (псевдоним актуальной Flash-модели). Фактическая версия модели пишется в паспорт отчёта. |
-| Сменить модель | `GEMINI_MODEL` в `.env` или `--model` |
-| Если кончилась квота | Flash-Lite-модель с более высокими лимитами |
+| По умолчанию | Google Gemini `gemini-3.8-flash` (бесплатный тариф AI Studio). Фактическая версия модели пишется в паспорт отчёта. |
+| Резервные модели | `gemini-3.7-flash` → `gemini-3.6-flash` → `gemini-3.5-flash` → `gemini-2.5-flash`. Если модель перегружена (503), не найдена (404) или исчерпала дневную квоту, агент сам переходит к следующей. У каждой модели своя квота. Список задаётся в `GEMINI_FALLBACK_MODELS` или `--fallback-models`. |
+| Сменить модель | `GEMINI_MODEL` в `.env` или `--model`. Модели, доступные вашему ключу: `python -m revizor --list-models` |
 | Другие провайдеры | `LLM_PROVIDER=openai`: OpenAI, OpenRouter, LM Studio, vLLM, Ollama (`OPENAI_BASE_URL=http://localhost:11434/v1`) |
 | Лимиты | По умолчанию 5 запросов в минуту (`LLM_RPM`) и не больше 12 новых вызовов на прогон (`LLM_MAX_CALLS`). При ответе 429 агент ждёт и повторяет запрос. |
 | Кэш | Ответы модели кэшируются в `.cache/llm`. Повторный прогон того же документа бесплатен, `--replay` работает без сети. |
@@ -136,6 +136,7 @@ flowchart LR
 | `--interactive`, `-i` | Задать уточняющие вопросы в консоли и перепроверить дефекты |
 | `--answers FILE` | Взять ответы из файла |
 | `--provider gemini\|openai`, `--model`, `--base-url` | Выбор модели |
+| `--fallback-models a,b,c` | Резервные модели |
 | `--replay` | Только сохранённые ответы модели (без сети и ключа) |
 | `--no-cache` | Не использовать кэш |
 | `--max-calls N`, `--rpm N` | Бюджет вызовов и лимит частоты |

@@ -98,6 +98,26 @@ def _is_daily_quota(err: Exception) -> bool:
     return bool(re.search(r"PerDay|per day|daily", s, re.I))
 
 
+def _status(err: Exception) -> int | None:
+    for attr in ("code", "status_code"):
+        v = getattr(err, attr, None)
+        if isinstance(v, int):
+            return v
+    return None
+
+
+def _unavailable_reason(err: Exception) -> str | None:
+    """Причина, по которой имеет смысл переключиться на резервную модель."""
+    code = _status(err)
+    if code == 404:
+        return "модель не найдена"
+    if code == 503 or re.search(r"high demand|overloaded|UNAVAILABLE", str(err)):
+        return "модель перегружена (503)"
+    if code == 429 and _is_daily_quota(err):
+        return "исчерпана дневная квота"
+    return None
+
+
 # ------------------------------------------------------------------ backends
 class _Gemini:
     name = "gemini"
@@ -232,9 +252,13 @@ class LLMClient:
         temperature: float | None = None,
         thinking_level: str | None = None,
         on_wait: Callable[[str], None] | None = None,
+        fallback_models: list[str] | None = None,
     ):
         self.provider = provider
         self.model = model
+        # резервные модели: при перегрузке/недоступности/исчерпании квоты переключаемся по цепочке
+        self.fallback_models = [m for m in (fallback_models or []) if m and m != model]
+        self.switches: list[str] = []
         self.cache_dir = cache_dir
         self.replay = replay
         self.min_interval = 60.0 / rpm if rpm else 0.0
@@ -307,7 +331,7 @@ class LLMClient:
             obj = schema.model_validate_json(extract_json(text))
         record = CallRecord(
             agent=agent,
-            model=self.model,
+            model=self.backend.model,
             model_version=meta.get("model_version", self.model),
             cached=False,
             seconds=round(time.monotonic() - started, 1),
@@ -331,9 +355,21 @@ class LLMClient:
             time.sleep(wait)
         self._last_call = time.monotonic()
 
+    def _switch_model(self, reason: str) -> bool:
+        """Переключиться на следующую резервную модель; False — резервы кончились."""
+        tried = {self.backend.model, *self.switches}
+        nxt = next((m for m in self.fallback_models if m not in tried), None)
+        if not nxt:
+            return False
+        self.on_wait(f"{self.backend.model}: {reason} — переключаюсь на {nxt}")
+        self.switches.append(self.backend.model)
+        self.backend.model = nxt
+        return True
+
     def _call(self, system: str, user: str, schema: type[BaseModel]) -> tuple[str, dict, int]:
         backend = self.backend
         attempts = 0
+        overloaded = 0
         while True:
             attempts += 1
             self._throttle()
@@ -341,16 +377,27 @@ class LLMClient:
                 text, meta = backend.complete(system, user, schema)
                 return text, meta, attempts
             except Exception as err:  # noqa: BLE001 — решаем ниже, повторять ли
-                if backend.retryable(err) and _is_daily_quota(err):
-                    raise QuotaExhausted(
-                        "Исчерпана дневная квота бесплатного тарифа модели "
-                        f"{self.model}. Используйте другую модель (например, Flash-Lite) "
-                        "или кэш (--replay)."
-                    ) from err
+                reason = _unavailable_reason(err)
+                if reason:
+                    # перегрузку сначала пережидаем коротко, затем идём к резервной модели
+                    if reason.startswith("модель перегружена") and overloaded < 2:
+                        overloaded += 1
+                        self.on_wait(f"{backend.model}: {reason}, повтор через {5 * overloaded} с")
+                        time.sleep(5 * overloaded)
+                        continue
+                    if self._switch_model(reason):
+                        overloaded = 0
+                        continue
+                    if reason == "исчерпана дневная квота":
+                        raise QuotaExhausted(
+                            f"Исчерпана дневная квота модели {backend.model} и резервных моделей. "
+                            "Укажите другую модель (--model) или используйте кэш (--replay)."
+                        ) from err
+                    raise LLMError(f"{backend.model}: {reason}; резервные модели тоже недоступны.") from err
                 if not backend.retryable(err) or attempts >= 6:
-                    raise LLMError(f"Ошибка вызова модели {self.model}: {err}") from err
+                    raise LLMError(f"Ошибка вызова модели {backend.model}: {err}") from err
                 delay = _retry_delay(err) or min(60.0, 5.0 * 2 ** (attempts - 1))
-                self.on_wait(f"лимит/ошибка сервиса, повтор через {delay:.0f} с (попытка {attempts + 1})")
+                self.on_wait(f"лимит запросов/ошибка сервиса, повтор через {delay:.0f} с (попытка {attempts + 1})")
                 time.sleep(delay)
 
     def trace(self) -> list[dict]:
