@@ -140,6 +140,9 @@ def _unavailable_reason(err: Exception) -> str | None:
         return "модель не найдена"
     if code == 403 or "PERMISSION_DENIED" in str(err):
         return "нет доступа к модели"
+    if code == 504 or "DEADLINE_EXCEEDED" in str(err) or isinstance(err, TimeoutError):
+        # модель не успела ответить за таймаут запроса — повтор на ней же снова займёт минуты
+        return "модель не ответила вовремя (504)"
     if code == 503 or re.search(r"high demand|overloaded|UNAVAILABLE", str(err)):
         return "модель перегружена (503)"
     if code == 429 and _is_daily_quota(err):
@@ -148,11 +151,11 @@ def _unavailable_reason(err: Exception) -> str | None:
 
 
 # ------------------------------------------------------------------ backends
-# таймаут одного запроса к Gemini: судья на большом ТЗ думает минуты, но не бесконечно
-GEMINI_TIMEOUT_MS = 600_000
+# таймаут одного запроса к Gemini: самый долгий вызов (нарезчик, судья) занимает 1–2 минуты; запас ×2,5
+GEMINI_TIMEOUT_MS = 300_000
 
 
-def _gemini_client(api_key: str):
+def _gemini_client(api_key: str, timeout_ms: int = GEMINI_TIMEOUT_MS):
     """Клиент Gemini без внутренних повторов SDK.
 
     SDK по умолчанию повторяет запрос до 5 раз с паузами до минуты (в том числе при 429 и 503) —
@@ -164,8 +167,12 @@ def _gemini_client(api_key: str):
 
     return genai.Client(
         api_key=api_key,
-        http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS, retry_options=types.HttpRetryOptions(attempts=1)),
+        http_options=types.HttpOptions(timeout=timeout_ms, retry_options=types.HttpRetryOptions(attempts=1)),
     )
+
+
+# предполётная проверка: модель, не ответившая на «ok» за это время, сейчас перегружена
+PREFLIGHT_TIMEOUT_MS = 20_000
 
 
 class _Gemini:
@@ -174,6 +181,7 @@ class _Gemini:
     def __init__(self, api_key: str, model: str, temperature: float | None, thinking_level: str | None):
         if not api_key:
             raise LLMError("Не задан GEMINI_API_KEY (см. README, раздел «Ключ LLM»).")
+        self._api_key = api_key
         self.client = _gemini_client(api_key)
         self.model = model
         self.temperature = temperature
@@ -226,6 +234,14 @@ class _Gemini:
         if isinstance(err, errors.ServerError):
             return True
         return isinstance(err, errors.ClientError) and err.code == 429
+
+    def ping(self) -> None:
+        """Короткий запрос с малым таймаутом: отвечает ли модель прямо сейчас."""
+        from google.genai import types
+
+        client = getattr(self, "_ping_client", None) or _gemini_client(self._api_key, PREFLIGHT_TIMEOUT_MS)
+        self._ping_client = client
+        client.models.generate_content(model=self.model, contents="ok", config=types.GenerateContentConfig(max_output_tokens=16))
 
     @staticmethod
     def list_models(api_key: str) -> list[str]:
@@ -415,11 +431,31 @@ class LLMClient:
         payload = json.dumps([self.provider, self.model, system, user, inline_schema(schema)], ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+    def _prompt_key(self, system: str, user: str, schema: type[BaseModel]) -> str:
+        """Ключ без имени модели: --replay находит ответ, даже если в .env указана другая модель."""
+        payload = json.dumps([self.provider, system, user, inline_schema(schema)], ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _find_by_prompt(self, prompt_key: str) -> Path | None:
+        for d in [self.cache_dir, *self.extra_cache_dirs]:
+            if not d or not d.exists():
+                continue
+            for p in sorted(d.glob("*.json")):
+                try:
+                    if json.loads(p.read_text(encoding="utf-8")).get("prompt_key") == prompt_key:
+                        return p
+                except (OSError, json.JSONDecodeError):
+                    continue
+        return None
+
     def generate(self, agent: str, system: str, user: str, schema: type[T]) -> T:
         key = self._cache_key(system, user, schema)
+        prompt_key = self._prompt_key(system, user, schema)
         path = self.cache_dir / f"{key}.json" if self.cache_dir else None
         # дополнительные каталоги кэша только для чтения (например, ответы финального прогона в репозитории)
         found = next((p for p in [path, *(d / f"{key}.json" for d in self.extra_cache_dirs)] if p and p.exists()), None)
+        if found is None and self.replay:
+            found = self._find_by_prompt(prompt_key)
         if found:
             data = json.loads(found.read_text(encoding="utf-8"))
             try:
@@ -482,7 +518,11 @@ class LLMClient:
         if path:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
-                json.dumps({"agent": agent, "text": text, "meta": meta}, ensure_ascii=False, indent=1),
+                json.dumps(
+                    {"agent": agent, "model": self.model, "prompt_key": prompt_key, "text": text, "meta": meta},
+                    ensure_ascii=False,
+                    indent=1,
+                ),
                 encoding="utf-8",
             )
         return obj
@@ -556,6 +596,39 @@ class LLMClient:
                 delay = _retry_delay(err) or min(60.0, 5.0 * 2 ** (attempts - 1))
                 self.on_wait(f"лимит запросов/ошибка сервиса, повтор через {delay:.0f} с (попытка {attempts + 1})")
                 time.sleep(delay)
+
+    def preflight(self) -> str | None:
+        """Выбрать первую модель цепочки, которая отвечает прямо сейчас (Gemini).
+
+        При перегрузке основная модель не отвечает до таймаута запроса (минуты) — без проверки агент
+        простаивал бы так на каждой перегруженной модели. Здесь каждой модели даётся «ok» с таймаутом
+        20 с. Если не ответила ни одна — остаётся основная модель, дальше работают обычные повторы.
+        """
+        if self.replay or self.provider != "gemini":
+            return None
+        backend = self.backend
+        if not hasattr(backend, "ping"):
+            return None
+        chain = [self.model, *[m for m in self.fallback_models if m != self.model]]
+        for model in chain:
+            backend.model = model
+            try:
+                backend.ping()
+            except Exception as err:  # noqa: BLE001 — любая ошибка = модель сейчас не годится
+                fatal = _fatal_reason(err)
+                if fatal:
+                    raise FatalLLMError(f"{model}: {fatal}.") from err
+                reason = _unavailable_reason(err) or "не отвечает"
+                self.on_wait(f"предполётная проверка: {model} — {reason}")
+                if model not in self.switches:
+                    self.switches.append(model)
+                continue
+            if model != self.model:
+                self.on_wait(f"предполётная проверка: работаем на {model}")
+            return model
+        backend.model = self.model
+        self.switches.clear()
+        return None
 
     def trace(self) -> list[dict]:
         return [asdict(c) for c in self.calls]

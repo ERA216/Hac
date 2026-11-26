@@ -224,6 +224,15 @@ class Pipeline:
         numbered = doc.numbered()
         base_ctx = {"doc": doc, "numbered": numbered}
 
+        # 0. Предполётная проверка: начинаем с модели цепочки, которая отвечает прямо сейчас
+        if self.llm.provider == "gemini" and not self.llm.replay:
+
+            def preflight():
+                model = self.llm.preflight()
+                return f"работаем на {model}" if model else "ни одна модель не ответила быстро — начинаем с основной"
+
+            self._step(state, "Проверка доступности модели", "LLM", preflight)
+
         # 1. Нарезка
         def segment():
             # длинный документ режем на части по заголовкам; если LLM недоступна — нарезка по структуре

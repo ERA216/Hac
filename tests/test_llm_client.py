@@ -99,6 +99,71 @@ def test_overload_falls_back_to_next_model():
     assert c.calls[0].model == "m2" and c.switches == ["m1"]
 
 
+def test_deadline_exceeded_switches_model_immediately():
+    # 504: модель не успела за таймаут — сразу следующая модель, без повторов на той же
+    c = client([ApiError(504, "DEADLINE_EXCEEDED"), GOOD], fallback_models=["m2"])
+    c.generate("a", "s", "u", ClarifyOut)
+    assert c._backend.models_used == ["m1", "m2"]
+
+
+def test_replay_finds_answer_saved_under_other_model_name(tmp_path):
+    c = client([GOOD], tmp_path)  # сохранили ответ, полученный моделью m1
+    c.generate("clarifier", "s", "u", ClarifyOut)
+    other = LLMClient("gemini", "другая-модель-из-env", cache_dir=tmp_path, replay=True, rpm=0)
+    assert other.generate("clarifier", "s", "u", ClarifyOut).questions[0].addressee == "Аналитик"
+    not_replay = LLMClient("gemini", "другая-модель-из-env", cache_dir=tmp_path, rpm=0)
+    not_replay._backend = ScriptedBackend([GOOD], model="другая-модель-из-env")
+    not_replay.generate("clarifier", "s", "u", ClarifyOut)
+    assert not_replay.real_calls == 1  # без --replay кэш другой модели не подменяет новую
+
+
+class PingBackend(ScriptedBackend):
+    def __init__(self, alive, **kw):
+        super().__init__([GOOD], **kw)
+        self.alive = set(alive)
+        self.pinged = []
+
+    def ping(self):
+        self.pinged.append(self.model)
+        if self.model not in self.alive:
+            raise ApiError(504, "DEADLINE_EXCEEDED")
+
+
+def test_preflight_picks_first_responsive_model():
+    msgs = []
+    c = LLMClient("gemini", "m1", cache_dir=None, rpm=0, fallback_models=["m2", "m3"], on_wait=msgs.append)
+    c._backend = PingBackend(alive={"m3"})
+    assert c.preflight() == "m3"
+    assert c._backend.pinged == ["m1", "m2", "m3"] and c._backend.model == "m3"
+    c.generate("a", "s", "u", ClarifyOut)
+    assert c.calls[0].model == "m3" and any("работаем на m3" in m for m in msgs)
+
+
+def test_real_gemini_backend_ping_is_instance_method(monkeypatch):
+    # настоящий класс бэкенда: ping вызывается у экземпляра и идёт в API с коротким таймаутом
+    from revizor.llm import PREFLIGHT_TIMEOUT_MS, _Gemini
+
+    backend = _Gemini("test-key", "m1", None, None)
+    sent = {}
+
+    class Models:
+        def generate_content(self, model, contents, config):
+            sent.update(model=model, max_tokens=config.max_output_tokens)
+
+    class Client:
+        models = Models()
+
+    monkeypatch.setattr(llm_mod, "_gemini_client", lambda key, timeout_ms=0: sent.update(timeout=timeout_ms) or Client())
+    backend.ping()
+    assert sent == {"timeout": PREFLIGHT_TIMEOUT_MS, "model": "m1", "max_tokens": 16}
+
+
+def test_preflight_keeps_primary_when_nothing_answers():
+    c = LLMClient("gemini", "m1", cache_dir=None, rpm=0, fallback_models=["m2"])
+    c._backend = PingBackend(alive=set())
+    assert c.preflight() is None and c._backend.model == "m1" and c.switches == []
+
+
 def test_daily_quota_switches_and_then_exhausts():
     quota = ApiError(429, "RESOURCE_EXHAUSTED requests per day limit exceeded")
     c = client([quota, GOOD], fallback_models=["m2"])
