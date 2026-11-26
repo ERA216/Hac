@@ -78,6 +78,8 @@ def test_unexpected_error_in_one_agent_keeps_the_report():
     judge = next(s for s in state.steps if s.title == "Судья-верификатор")
     assert not judge.ok and "внутренняя ошибка KeyError" in judge.note
     assert state.findings and state.questions  # кандидаты дошли до отчёта, уточнения работали
+    # противоречия из сверок ведут на итоговые дефекты и без судьи
+    assert state.pairs[0].finding_id.startswith("D-") and state.acceptance[1].finding_id.startswith("D-")
     assert "Прогон выполнен не полностью" in render_markdown(state, llm)
 
 
