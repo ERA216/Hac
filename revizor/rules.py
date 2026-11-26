@@ -179,8 +179,9 @@ def check_empty_sections(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
         nxt_no, nxt_level = heads[i + 1] if i + 1 < len(heads) else (len(doc.lines) + 1, 0)
         if nxt_level > level:
             continue  # есть подразделы
-        body = [doc.line(n).text for n in range(no + 1, nxt_no) if doc.line(n)]
-        title = re.sub(r"^#{1,6}\s*|[*_`]", "", doc.line(no).text).strip()
+        body = [bl.text for n in range(no + 1, nxt_no) if (bl := doc.line(n)) is not None]
+        head_line = doc.line(no)
+        title = re.sub(r"^#{1,6}\s*|[*_`]", "", head_line.text if head_line else "").strip()
         if re.match(r"^[1-5]\d\d\b", title):
             continue  # «#### 200. Лимит сохранён» — заголовок и есть описание кода ответа
         if not any(t.strip() and t.strip() != "---" for t in body):
@@ -216,7 +217,7 @@ def check_money_units(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     if not minor or not major:
         return []
     # в первую очередь показываем строки, где обе единицы встречаются рядом (одна сущность)
-    both = [n for n in minor if _MAJOR_UNIT.search(doc.line(n).text)]
+    both = [n for n in minor if (ln := doc.line(n)) is not None and _MAJOR_UNIT.search(ln.text)]
     evid_lines = (both or minor[:1]) + [n for n in major if n not in both][:1]
     return [
         RuleHit(
@@ -244,8 +245,8 @@ def check_http(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
         or re.match(r"^\s*[*`]*(GET|POST|PUT|PATCH|DELETE)[*`]*\s+`?/[\w/{}.-]+", ln.text)  # «GET /transfers/create»
     ]
     for ml in method_lines:
-        method = _HTTP_METHOD.search(ml.text).group(1)
-        if method != "GET":
+        m_method = _HTTP_METHOD.search(ml.text)
+        if not m_method or m_method.group(1) != "GET":
             continue
         # ищем признаки изменения состояния в том же разделе API
         scope = [ln for ln in doc.lines if ln.section.split(" › ")[0] == ml.section.split(" › ")[0]]
@@ -663,7 +664,8 @@ def check_fintech_checklist(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
 
     vague = [ln for ln in lines if _TXN_VAGUE.search(ln.text)]
     if vague and _CARD_DOMAIN.search(full) and not _TXN_STAGE_DEFINED.search(full):
-        word = _TXN_VAGUE.search(vague[0].text).group(0)
+        m_word = _TXN_VAGUE.search(vague[0].text)
+        word = m_word.group(0) if m_word else vague[0].text
         hits.append(
             RuleHit(
                 rule="R-TXN-STAGE",
@@ -705,5 +707,6 @@ def run_rules(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     for h in hits:
         for e in h.evidence:
             if not e.quote:
-                e.quote = clean_line(doc.line(e.line_start).text) if e.line_start else ""
+                ln = doc.line(e.line_start) if e.line_start else None
+                e.quote = clean_line(ln.text) if ln else ""
     return hits

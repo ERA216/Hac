@@ -75,9 +75,10 @@ class QuoteLocator:
 
     def locate(self, quote: str, hint_line: int | None = None) -> Evidence:
         pieces = [p for p in re.split(r"\.\.\.|…", quote) if normalize(p)]
-        found = [self._find(p) for p in pieces] if pieces else []
+        results = [self._find(p) for p in pieces] if pieces else []
+        found = [r for r in results if r is not None]
         ev = Evidence(quote=quote.strip())
-        if not found or any(f is None for f in found):
+        if not found or len(found) != len(results):  # хотя бы одна часть цитаты не найдена
             if hint_line and self.doc.line(hint_line):
                 ev.line_start = ev.line_end = hint_line
                 ev.location = self.doc.location(hint_line)

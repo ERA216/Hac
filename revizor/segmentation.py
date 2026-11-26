@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 from .document import Document
-from .schemas import RequirementOut
+from .schemas import RequirementKind, RequirementOut
 from .verify import clean_line
 
 # разделы без требований: метаданные, ревью, согласования, история
@@ -26,7 +26,7 @@ _HEADING = re.compile(r"^#{1,6}\s")
 _STATUS = re.compile(r"^\s*\*\*([1-5]\d\d)\.?\*\*")
 _PLACEHOLDER = re.compile(r"заполня\w+ (позже|тестировщик\w*|аналитик\w*)|\bTBD\b|\bTODO\b|не заполнен", re.I)
 
-KIND_BY_SECTION = [
+KIND_BY_SECTION: list[tuple[re.Pattern[str], RequirementKind]] = [
     (re.compile(r"нефункциональн|производительн|надёжн|надежн|доступност|SLA", re.I), "nonfunctional"),
     (re.compile(r"функциональн", re.I), "functional"),
     (re.compile(r"критери\w* при[её]мк|acceptance", re.I), "acceptance"),
@@ -38,7 +38,7 @@ KIND_BY_SECTION = [
 ]
 
 
-def _kind(section: str) -> str:
+def _kind(section: str) -> RequirementKind:
     for rx, kind in KIND_BY_SECTION:
         if rx.search(section):
             return kind

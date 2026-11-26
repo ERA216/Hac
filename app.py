@@ -45,9 +45,24 @@ class StatusProgress:
 with st.sidebar:
     st.header("Ревизор ТЗ")
     st.caption(f"Версия {__version__}. Проверка требований по ISO/IEC/IEEE 29148 и IEEE 830.")
-    model = st.text_input("Модель", value="", placeholder="из .env (gemini-3.8-flash)")
+    MODES = {
+        "Gemini (облако)": "gemini",
+        "Локальная модель Ollama": "ollama",
+        "Только кэш (без сети и ключа)": "replay",
+    }
+    default_mode = "Локальная модель Ollama" if os.getenv("LLM_PROVIDER") == "ollama" else "Gemini (облако)"
+    mode_label = st.radio(
+        "Где работает модель",
+        list(MODES),
+        index=list(MODES).index(default_mode),
+        help="Ollama: документ не покидает компьютер (контур банка). Кэш: сохранённые ответы, для демо без ключа.",
+    )
+    mode = MODES[mode_label]
+    replay = mode == "replay"
+    provider = "ollama" if mode == "ollama" else "gemini"
+    placeholder = os.getenv("OLLAMA_MODEL", "qwen3:4b") if provider == "ollama" else os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    model = st.text_input("Модель", value="", placeholder=f"из .env ({placeholder})", disabled=replay)
     use_cache = st.toggle("Кэш ответов модели", value=True, help="Повторная проверка того же документа не тратит квоту")
-    replay = st.toggle("Только кэш (без сети)", value=False, help="Для демо без ключа: использовать сохранённые ответы")
     st.divider()
     st.markdown(
         "**Агенты:** нарезчик → правила → аналитик · тестировщик · архитектор · ИБ → "
@@ -94,6 +109,7 @@ def make_pipeline(llm, box) -> Pipeline:
 
 def make_llm(box):
     return llm_from_env(
+        provider=provider,
         model=model or None,
         cache_dir=(ROOT / ".cache" / "llm") if use_cache or replay else None,
         replay=replay,
@@ -103,13 +119,13 @@ def make_llm(box):
 
 def key_problem() -> str | None:
     """Нет ключа Gemini и не включён режим «только кэш» — объясняем сразу, а не после минуты ожидания."""
-    if replay or os.getenv("LLM_PROVIDER", "gemini") != "gemini":
+    if replay or provider != "gemini":
         return None
     key = os.getenv("GEMINI_API_KEY", "")
     if not key or key.startswith("your_"):
         return (
             "Не задан ключ GEMINI_API_KEY. Скопируйте .env.example в .env, впишите ключ из "
-            "https://aistudio.google.com/ и перезапустите интерфейс. Без ключа включите «Только кэш (без сети)» "
+            "https://aistudio.google.com/ и перезапустите интерфейс. Без ключа выберите режим «Только кэш» "
             "и возьмите пример ТЗ хакатона."
         )
     return None
@@ -121,6 +137,7 @@ if st.button("Проверить документ", type="primary", disabled=not
         st.stop()
     with st.status("Агенты анализируют документ…", expanded=True) as box:
         try:
+            assert doc_path is not None  # кнопка неактивна, пока документ не выбран
             doc = load_document(doc_path)
             box.write(
                 f"📄 Загружен документ «{doc.title}»: {len(doc.lines)} строк" + (f", {doc.pages} стр." if doc.pages else "")

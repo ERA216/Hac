@@ -55,7 +55,7 @@ def build_context(state: RunState, llm: LLMClient) -> dict:
             return "⚠️ есть замечания"
         return "✅ без замечаний"
 
-    req_rows = []
+    req_rows: list[dict] = []
     for r in state.requirements:
         fs = by_req.get(r.rid, [])
         req_rows.append(

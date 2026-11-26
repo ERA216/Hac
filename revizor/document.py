@@ -105,8 +105,9 @@ def _implicit_headings(texts: list[str]) -> dict[int, tuple[int, str]]:
         if t.startswith(("|", "-", "*", "#")):
             continue
         m = _NUM_HEAD.match(t)
-        if m and not re.search(r"[.;:,!?]$", t):
-            depth, num = _num_key(t)
+        key = _num_key(t)
+        if m and key and not re.search(r"[.;:,!?]$", t):
+            depth, num = key
             prev = _num_key(texts[nonempty[k - 1]]) if k > 0 else None
             nxt = _num_key(texts[nonempty[k + 1]]) if k + 1 < len(nonempty) else None
             # пункт списка — если сосед того же уровня продолжает нумерацию подряд (1 → 2)

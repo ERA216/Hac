@@ -32,3 +32,8 @@ jobs:
           pip install ruff
           ruff check .
           ruff format --check .
+
+      - name: Проверка типов (mypy)
+        run: |
+          pip install mypy
+          mypy

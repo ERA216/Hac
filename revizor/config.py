@@ -35,7 +35,7 @@ def llm_from_env(
     rpm: float | None = None,
     on_wait: Callable[[str], None] | None = None,
 ) -> LLMClient:
-    provider = provider or os.getenv("LLM_PROVIDER", "gemini")
+    provider = provider or os.getenv("LLM_PROVIDER") or "gemini"  # пустая переменная окружения — тоже gemini
     if provider == "gemini":
         api_key = os.getenv("GEMINI_API_KEY", "")
         model = model or os.getenv("GEMINI_MODEL") or DEFAULT_MODELS["gemini"]

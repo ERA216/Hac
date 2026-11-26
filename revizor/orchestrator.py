@@ -136,7 +136,7 @@ class Pipeline:
         max_findings_per_agent: int = 15,
         max_questions: int = 10,
         parallel: int = 4,
-        thread_initializer: Callable[[], None] | None = None,
+        thread_initializer: Callable[[], object] | None = None,
         segment_chunk_chars: int = 24000,
     ):
         self.llm = llm
@@ -476,10 +476,12 @@ class Pipeline:
                 )
             )
         for r in out.rejected:
-            c = by_id.get(r.candidate_id)
-            if c and c.fid not in used:
-                used.add(c.fid)
-                state.rejected.append(Rejected(candidate_id=c.fid, title=c.title, source=", ".join(c.sources), reason=r.reason))
+            rej = by_id.get(r.candidate_id)
+            if rej and rej.fid not in used:
+                used.add(rej.fid)
+                state.rejected.append(
+                    Rejected(candidate_id=rej.fid, title=rej.title, source=", ".join(rej.sources), reason=r.reason)
+                )
         # кандидаты, о которых судья забыл, не теряем
         orphans = [c for c in state.candidates if c.fid not in used]
         for c in orphans:
@@ -573,11 +575,11 @@ class Pipeline:
                 changed += status != "open"
         added = 0
         for nf in out.new_findings:
-            f = self._from_out(state, loc, nf, "recheck")
-            f.evidence = [e for e in f.evidence if e.verified]
-            if f.evidence:
-                f.fid = f"D-{len(state.findings) + 1:02d}"
-                state.findings.append(f)
+            new = self._from_out(state, loc, nf, "recheck")
+            new.evidence = [e for e in new.evidence if e.verified]
+            if new.evidence:
+                new.fid = f"D-{len(state.findings) + 1:02d}"
+                state.findings.append(new)
                 added += 1
         note = f"закрыто/изменено {changed} из {len(affected)} затронутых дефектов, новых: {added}"
         return note + (f"; возвращено в открытые (обоснование противоречило статусу): {downgraded}" if downgraded else "")

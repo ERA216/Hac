@@ -24,6 +24,10 @@ from pydantic import BaseModel, ValidationError
 
 T = TypeVar("T", bound=BaseModel)
 
+# лимит выходных токенов (у моделей Gemini 3 в него входят и «размышления»): судья на большом ТЗ
+# пишет длинный реестр — с запасом, чтобы JSON не обрывался
+MAX_OUTPUT_TOKENS = 65536
+
 
 class LLMError(RuntimeError):
     pass
@@ -155,25 +159,29 @@ class _Gemini:
         self.client = genai.Client(api_key=api_key)
         self.model = model
         self.temperature = temperature
-        self.thinking_level = thinking_level
+        # «low» / «LOW» / «Low» → значение SDK; неизвестное значение игнорируем (модель решает сама)
+        level = (thinking_level or "").strip().upper()
+        valid = {lv.value for lv in __import__("google.genai.types", fromlist=["ThinkingLevel"]).ThinkingLevel}
+        self.thinking_level = level if level in valid and level != "THINKING_LEVEL_UNSPECIFIED" else None
         self.schema_supported = True
 
     def complete(self, system: str, user: str, schema: type[BaseModel]) -> tuple[str, dict]:
         from google.genai import errors, types
 
-        kwargs = dict(system_instruction=system, response_mime_type="application/json", max_output_tokens=32768)
-        if self.temperature is not None:
-            kwargs["temperature"] = self.temperature
-        if self.thinking_level:
-            kwargs["thinking_config"] = types.ThinkingConfig(thinking_level=self.thinking_level)
-        if self.schema_supported:
-            kwargs["response_json_schema"] = inline_schema(schema)
-        else:
+        if not self.schema_supported:
             user = user + "\n\nВерни JSON строго по схеме:\n" + json.dumps(inline_schema(schema), ensure_ascii=False)
+        config = types.GenerateContentConfig(
+            system_instruction=system,
+            response_mime_type="application/json",
+            max_output_tokens=MAX_OUTPUT_TOKENS,
+            temperature=self.temperature,
+            thinking_config=(
+                types.ThinkingConfig(thinking_level=types.ThinkingLevel(self.thinking_level)) if self.thinking_level else None
+            ),
+            response_json_schema=inline_schema(schema) if self.schema_supported else None,
+        )
         try:
-            resp = self.client.models.generate_content(
-                model=self.model, contents=user, config=types.GenerateContentConfig(**kwargs)
-            )
+            resp = self.client.models.generate_content(model=self.model, contents=user, config=config)
         except errors.ClientError as e:
             if e.code == 400 and self.schema_supported and "schema" in str(e).lower():
                 self.schema_supported = False  # модель не поддерживает JSON Schema — схема уйдёт в промпт
@@ -186,10 +194,11 @@ class _Gemini:
             "output_tokens": getattr(usage, "candidates_token_count", 0) or 0,
             "thoughts_tokens": getattr(usage, "thoughts_token_count", 0) or 0,
         }
+        reason = resp.candidates[0].finish_reason if resp.candidates else None
+        meta["truncated"] = "MAX_TOKENS" in str(reason)
         text = resp.text
         if not text:
-            reason = resp.candidates[0].finish_reason if resp.candidates else "нет кандидатов"
-            raise LLMError(f"Пустой ответ модели (finish_reason={reason})")
+            raise LLMError(f"Пустой ответ модели (finish_reason={reason or 'нет кандидатов'})")
         return text, meta
 
     @staticmethod
@@ -209,7 +218,8 @@ class _Gemini:
         for m in client.models.list():
             actions = getattr(m, "supported_actions", None) or []
             if not actions or "generateContent" in actions:
-                out.append(m.name.removeprefix("models/"))
+                if m.name:
+                    out.append(m.name.removeprefix("models/"))
         return out
 
 
@@ -251,6 +261,7 @@ class _OpenAICompatible:
             "model_version": resp.model or self.model,
             "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
             "output_tokens": getattr(usage, "completion_tokens", 0) or 0,
+            "truncated": resp.choices[0].finish_reason == "length",
         }
         return resp.choices[0].message.content or "", meta
 
@@ -312,6 +323,7 @@ class _Ollama:
             "model_version": data.get("model", self.model),
             "prompt_tokens": data.get("prompt_eval_count", 0) or 0,
             "output_tokens": data.get("eval_count", 0) or 0,
+            "truncated": data.get("done_reason") == "length",
         }
         return data.get("message", {}).get("content", ""), meta
 
@@ -419,12 +431,20 @@ class LLMClient:
         try:
             obj = schema.model_validate_json(extract_json(text))
         except ValidationError as err:
-            repair = (
-                user
-                + "\n\nТвой предыдущий ответ не прошёл проверку схемы:\n"
-                + str(err)[:1500]
-                + "\nВерни исправленный JSON целиком."
-            )
+            if meta.get("truncated"):
+                # ответ упёрся в лимит длины — повтор того же запроса оборвётся так же; просим короче
+                repair = (
+                    user + "\n\nТвой предыдущий ответ был обрезан: он превысил лимит длины. Верни JSON заново и короче: "
+                    "problem и recommendation — по 1–2 предложения, rewrite — только где он действительно нужен, "
+                    "в списках оставь только самые важные элементы. JSON должен быть полным и корректным."
+                )
+            else:
+                repair = (
+                    user
+                    + "\n\nТвой предыдущий ответ не прошёл проверку схемы:\n"
+                    + str(err)[:1500]
+                    + "\nВерни исправленный JSON целиком."
+                )
             text, meta, more = self._call(system, repair, schema)
             attempts += more
             try:

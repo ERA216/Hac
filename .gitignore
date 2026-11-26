@@ -22,3 +22,5 @@ Thumbs.db
 .claude/
 reports/run.log
 pitch/
+.coverage
+htmlcov/

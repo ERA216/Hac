@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 def finding_lines(f: dict) -> set[int]:
-    lines = set()
+    lines: set[int] = set()
     for e in f.get("evidence", []):
         s, t = e.get("line_start"), e.get("line_end") or e.get("line_start")
         if s:
