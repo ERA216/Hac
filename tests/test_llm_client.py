@@ -136,6 +136,15 @@ def test_non_retryable_error_is_reported():
         c.generate("a", "s", "u", ClarifyOut)
 
 
+def test_gemini_client_has_no_hidden_sdk_retries():
+    # иначе SDK сам ждёт до минуты на каждой исчерпанной или перегруженной модели
+    from revizor.llm import GEMINI_TIMEOUT_MS, _gemini_client
+
+    options = _gemini_client("test-key")._api_client._http_options
+    assert options.retry_options.attempts == 1
+    assert options.timeout == GEMINI_TIMEOUT_MS
+
+
 def test_inline_schema_keeps_field_named_title():
     from revizor.llm import inline_schema
     from revizor.schemas import FindingOut

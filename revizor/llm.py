@@ -148,15 +148,33 @@ def _unavailable_reason(err: Exception) -> str | None:
 
 
 # ------------------------------------------------------------------ backends
+# таймаут одного запроса к Gemini: судья на большом ТЗ думает минуты, но не бесконечно
+GEMINI_TIMEOUT_MS = 600_000
+
+
+def _gemini_client(api_key: str):
+    """Клиент Gemini без внутренних повторов SDK.
+
+    SDK по умолчанию повторяет запрос до 5 раз с паузами до минуты (в том числе при 429 и 503) —
+    это прячет исчерпанную квоту и перегрузку, и переход на резервную модель занимал минуты.
+    Повторы и резервные модели делает LLMClient: коротко и с понятными сообщениями.
+    """
+    from google import genai
+    from google.genai import types
+
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS, retry_options=types.HttpRetryOptions(attempts=1)),
+    )
+
+
 class _Gemini:
     name = "gemini"
 
     def __init__(self, api_key: str, model: str, temperature: float | None, thinking_level: str | None):
-        from google import genai
-
         if not api_key:
             raise LLMError("Не задан GEMINI_API_KEY (см. README, раздел «Ключ LLM»).")
-        self.client = genai.Client(api_key=api_key)
+        self.client = _gemini_client(api_key)
         self.model = model
         self.temperature = temperature
         # «low» / «LOW» / «Low» → значение SDK; неизвестное значение игнорируем (модель решает сама)
@@ -211,9 +229,7 @@ class _Gemini:
 
     @staticmethod
     def list_models(api_key: str) -> list[str]:
-        from google import genai
-
-        client = genai.Client(api_key=api_key)
+        client = _gemini_client(api_key)
         out = []
         for m in client.models.list():
             actions = getattr(m, "supported_actions", None) or []
