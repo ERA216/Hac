@@ -686,6 +686,40 @@ def check_fintech_checklist(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     return hits
 
 
+# --- указания для ИИ-проверяющего внутри документа (prompt injection)
+_INJECTION = re.compile(
+    r"игнорир\w*\s+(?:все\s+)?(?:предыдущ\w*|выше\w*|прежн\w*|остальн\w*)?\s*(?:инструкци|указани|правил)\w*|"
+    r"ignore\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above)?\s*instructions|"
+    r"считай(?:те)?,?\s+что\s+(?:дефект|ошибк|замечани|недочёт|недочет)\w*\s+нет|"
+    r"не\s+(?:сообщай|указывай|выводи|отмечай)\w*\s+(?:о\s+)?(?:дефект|замечани|ошибк|недочёт|недочет)\w*|"
+    r"(?:системн\w*\s+промпт|system\s+prompt|you\s+are\s+(?:an?\s+)?(?:ai|language\s+model|assistant))|"
+    r"(?:для|к)\s+(?:ии|нейросет\w*|языков\w*\s+модел\w*|llm|chatgpt|gemini)\s*[:,]",
+    re.I,
+)
+
+
+def check_prompt_injection(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    """Текст, обращённый к модели-проверяющему, — попытка повлиять на ревью; агенты его не выполняют."""
+    lines = [ln.no for ln in doc.lines if _INJECTION.search(ln.text)]
+    if not lines:
+        return []
+    return [
+        RuleHit(
+            rule="R-INJECTION",
+            criterion="risk",
+            severity="critical",
+            title="В документе есть указания для ИИ-проверяющего (возможная prompt-инъекция)",
+            problem=(
+                "Фрагмент документа обращается не к исполнителям требований, а к модели, которая проводит ревью, "
+                "и пытается изменить её поведение. Агенты такие указания не выполняют, но сам документ требует "
+                "проверки ИБ: откуда взялся текст и не подменено ли содержание ТЗ."
+            ),
+            recommendation="Удалить вставку, выяснить её источник и повторить ревью исходной версии документа.",
+            evidence=[loc.line_evidence(no) for no in lines[:3]],
+        )
+    ]
+
+
 # --- одна и та же денежная величина с разными границами в разных местах документа
 _NUM = r"\d{1,3}(?:[   ]\d{3})+|\d+"
 _RANGE = re.compile(rf"(?<![\d:.,])(?:от\s+)?({_NUM})\s*(?:–|—|-|до)\s*({_NUM})(?![\d:.,]\d)")
@@ -758,6 +792,7 @@ ALL_RULES = [
     check_requirement_ids,
     check_fintech_checklist,
     check_range_consistency,
+    check_prompt_injection,
     check_money_units,
     check_http,
     check_status_codes,
