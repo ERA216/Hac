@@ -114,6 +114,12 @@ class RunState:
     def count(self, severity: str) -> int:
         return sum(1 for f in self.open_findings if f.severity == severity)
 
+    def asked(self, severity: str) -> tuple[int, int]:
+        """Сколько открытых дефектов этой критичности покрыто уточняющими вопросами: (с вопросом, всего)."""
+        linked = {fid for q in self.questions for fid in q.finding_ids}
+        of = [f for f in self.open_findings if f.severity == severity]
+        return sum(f.fid in linked for f in of), len(of)
+
     @property
     def ready_for_development(self) -> bool:
         llm_ok = self.verdict.ready_for_development if self.verdict else True

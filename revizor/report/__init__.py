@@ -192,6 +192,8 @@ def to_json(state: RunState, llm: LLMClient) -> dict:
             "ready_for_testing": state.ready_for_testing,
             "summary": state.verdict.summary if state.verdict else "",
         },
+        # сколько открытых дефектов покрыто уточняющими вопросами: [с вопросом, всего]
+        "question_coverage": {sev: list(state.asked(sev)) for sev in ("critical", "major")},
         "requirements": [r.model_dump() for r in state.requirements],
         "findings": [f.model_dump() for f in state.findings],
         # все находки агентов и правил до судьи (с подтверждёнными цитатами): видно, что судья объединил
@@ -215,13 +217,13 @@ def render_html_report(state: RunState, llm: LLMClient) -> str:
     return render_html(json.loads(json.dumps(to_json(state, llm), ensure_ascii=False, default=str)), state.doc)
 
 
-def write_reports(state: RunState, llm: LLMClient, report_path: Path) -> list[Path]:
+def write_reports(state: RunState, llm: LLMClient, report_path: Path | str) -> list[Path]:
     """Отчёт .md (основной), .json (данные) и .html (интерактивный) рядом друг с другом.
 
     Путь можно дать с любым расширением или без него («report.html», «report»): Markdown всегда
     пишется в .md, иначе HTML-версия затёрла бы его или файл остался бы без расширения.
     """
-    report_path = report_path.with_suffix(".md")
+    report_path = Path(report_path).with_suffix(".md")
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_markdown(state, llm), encoding="utf-8")
     data = to_json(state, llm)

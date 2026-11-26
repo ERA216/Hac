@@ -88,3 +88,21 @@ def test_ollama_provider_native_api():
     assert sent["options"]["num_ctx"] == 16384 and sent["think"] is False and sent["stream"] is False
     assert sent["format"]["type"] == "object"  # JSON-схема ответа передаётся модели
     assert llm.calls[0].prompt_tokens == 42 and llm.calls[0].model_version == "qwen3:4b"
+
+
+def test_question_coverage_of_serious_defects_is_reported():
+    from revizor.document import load_document
+    from revizor.orchestrator import Pipeline
+    from revizor.report import render_markdown, to_json
+
+    from .fake_llm import FakeLLM
+    from .test_pipeline import DOC
+
+    llm = FakeLLM()
+    state = Pipeline(llm).run(load_document(DOC))
+    asked, total = state.asked("critical")
+    assert total == state.count("critical") and 0 <= asked <= total
+    state.questions[0].finding_ids = [f.fid for f in state.open_findings if f.severity == "critical"]
+    assert state.asked("critical") == (total, total)
+    assert f"Вопросы покрывают {total} из {total} критичных" in render_markdown(state, llm)
+    assert to_json(state, llm)["question_coverage"]["critical"] == [total, total]

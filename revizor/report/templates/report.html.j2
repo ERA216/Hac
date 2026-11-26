@@ -258,7 +258,8 @@ function renderQuestions(){
   $('p-questions').innerHTML = `
     <div class="card"><b>Как ответить.</b> Выберите вариант или напишите свой ответ, затем нажмите «Скачать ответы». Передайте файл агенту:
       <div style="margin-top:6px"><code>python -m revizor ${esc(p.file)} report.md --answers answers.json</code></div>
-      Агент перепроверит дефекты с учётом ответов и отметит закрытые.</div>
+      Агент перепроверит дефекты с учётом ответов и отметит закрытые.
+      ${D.question_coverage && D.question_coverage.critical[1] ? `<div class="meta" style="margin-top:6px">Вопросы покрывают ${D.question_coverage.critical[0]} из ${D.question_coverage.critical[1]} критичных${D.question_coverage.major[1] ? ` и ${D.question_coverage.major[0]} из ${D.question_coverage.major[1]} существенных` : ''} дефектов.</div>` : ''}</div>
     ${D.questions.map(q => `<article class="card ${q.blocking ? 'sev-critical' : ''}">
       <h3>${esc(q.qid)} ${q.blocking ? '<span class="pill critical">блокирующий</span>' : ''}<span class="pill">${esc(q.addressee)}</span>
         ${q.finding_ids.map(id => `<a class="pill" href="#${id}" data-go="${id}">${id}</a>`).join('')}</h3>

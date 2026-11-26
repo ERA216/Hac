@@ -185,6 +185,10 @@
 - Закрыто уточнениями: {{ resolved | length }}.
 {% endif %}
 - Уточняющих вопросов: {{ state.questions | length }}{% if state.questions %} (блокирующих — {{ state.questions | selectattr("blocking") | list | length }}){% endif %}.
+{% set ac = state.asked("critical") %}{% set am = state.asked("major") %}
+{% if ac[1] or am[1] %}
+- Вопросы покрывают {% if ac[1] %}{{ ac[0] }} из {{ ac[1] }} критичных{% endif %}{% if ac[1] and am[1] %} и {% endif %}{% if am[1] %}{{ am[0] }} из {{ am[1] }} существенных{% endif %} дефектов: по ним автор ТЗ может сразу принять решение.
+{% endif %}
 
 **Нарушения по критериям:**
 

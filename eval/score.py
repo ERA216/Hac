@@ -66,7 +66,15 @@ def score(report: dict, golden: dict) -> dict:
         "findings_total": len(verified),
         "quotes": (report["passport"]["quotes_verified"], report["passport"]["quotes_checked"]),
         "dropped_unverified": len(findings) - len(verified),
+        "critical_asked": _asked(report, "critical"),
     }
+
+
+def _asked(report: dict, severity: str) -> tuple[int, int]:
+    """Открытые дефекты этой критичности, по которым задан уточняющий вопрос: (с вопросом, всего)."""
+    linked = {fid for q in report["questions"] for fid in q.get("finding_ids", [])}
+    of = [f for f in report["findings"] if f["severity"] == severity and f.get("status") != "resolved"]
+    return sum(f["fid"] in linked for f in of), len(of)
 
 
 def to_markdown(res: dict, report: dict) -> str:
@@ -80,6 +88,7 @@ def to_markdown(res: dict, report: dict) -> str:
         f"- **Все эталонные дефекты:** {res['all_found']} из {res['all_total']} ({res['recall_all']:.0%})",
         f"- **Цитаты подтверждены:** {res['quotes'][0]} из {res['quotes'][1]}",
         f"- **Дефектов в отчёте:** {res['findings_total']}, из них вне эталона: {len(res['extra'])}",
+        f"- **Критичные дефекты с уточняющим вопросом:** {res['critical_asked'][0]} из {res['critical_asked'][1]}",
         "",
         "| ID | Ключевой | Дефект эталона | Найден | Дефекты отчёта |",
         "| :--- | :---: | :--- | :---: | :--- |",
