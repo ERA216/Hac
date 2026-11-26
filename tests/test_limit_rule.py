@@ -40,6 +40,25 @@ def test_explicit_precedence_is_not_a_defect(tmp_path):
     assert hits == []
 
 
+def test_unconditional_property_of_the_object_is_not_a_conflict(tmp_path):
+    # безусловно описано свойство или учёт объекта, а не само действие — противоречия нет
+    for body in (
+        "* Не более одного запроса в секунду с одного устройства.\n* Запрос логируется независимо от результата.\n",
+        "* Отправляется не более одного SMS-кода в минуту.\n* SMS-код всегда содержит 6 цифр.\n",
+        "* У клиента может быть только одна активная карта.\n* Активная карта всегда отображается первой.\n",
+        "* Разрешается только одна попытка списания в сутки.\n* Попытка фиксируется в журнале вне зависимости от исхода.\n",
+    ):
+        assert _hits(tmp_path, body) == [], body
+
+
+def test_adjective_is_skipped_to_find_the_object(tmp_path):
+    hits = _hits(
+        tmp_path,
+        "* У клиента только одна активная карта.\n* При перевыпуске новая карта создаётся в любом случае.\n",
+    )
+    assert len(hits) == 1 and "«карта»" in hits[0].title
+
+
 def test_unrelated_override_and_frequency_limits_are_ignored(tmp_path):
     hits = _hits(
         tmp_path,

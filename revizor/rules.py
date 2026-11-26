@@ -788,10 +788,18 @@ def check_range_consistency(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
 # а какое правило главнее, не сказано
 _LIMIT = re.compile(
     r"(?<![\w-])(?:не более|не больше|не чаще|не свыше|максимум|не превышает|только|лишь)\s+"
-    r"(?:чем\s+)?(?:один|одн\w+|1)\s+(?:так\w+\s+|подобн\w+\s+)?([\w-]{3,})",
+    r"(?:чем\s+)?(?:один|одн\w+|1)\s+(?:так\w+\s+|подобн\w+\s+)?([\w-]{3,})(?:\s+([\w-]{3,}))?",
     re.I,
 )
 _LIMIT_SKIP = {"раз", "раза", "разу", "чем", "из", "или", "день", "сутки", "месяц", "минуту", "секунду", "час"}
+_ADJECTIVE = re.compile(r"(?:ая|яя|ое|ее|ый|ий|ой|ого|его)$", re.I)
+# второе требование должно безусловно вызывать само действие, а не описывать его свойства
+# («SMS-код всегда содержит 6 цифр», «запрос логируется независимо от результата» — не противоречие)
+_OCCURS = re.compile(
+    r"отправл\w*|направл\w*|присыла\w*|приход\w*|поступа\w*|вызыва\w*|получа\w*|формиру\w*|созда[её]\w*|"
+    r"генериру\w*|списыва\w*|списан\w*|начисля\w*|выполня\w*|запуска\w*|срабатыва\w*|доставля\w*|показыва\w*",
+    re.I,
+)
 _OVERRIDE = _w(r"независимо от|вне зависимости от|в любом случае|при любых условиях|всегда")
 _EXPLICIT_PRECEDENCE = re.compile(r"лимит|ограничени|сверх|исключени|приоритет", re.I)
 
@@ -810,6 +818,8 @@ def check_limit_override(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     for ln in lines:
         for m in _LIMIT.finditer(ln.text):
             obj = m.group(1)
+            if _ADJECTIVE.search(obj) and m.group(2):  # «одна активная карта» — предмет ограничения «карта»
+                obj = m.group(2)
             if obj.lower() in _LIMIT_SKIP:
                 continue
             obj_re = re.compile(rf"(?<![\w-]){re.escape(_stem(obj))}\w*", re.I)
@@ -817,7 +827,7 @@ def check_limit_override(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
                 if other.no == ln.no or (ln.no, other.no) in seen:
                     continue
                 override = _OVERRIDE.search(other.text)
-                if not (override and obj_re.search(other.text)):
+                if not (override and obj_re.search(other.text) and _OCCURS.search(other.text)):
                     continue
                 if _EXPLICIT_PRECEDENCE.search(other.text):  # «независимо от лимита» — исключение задано явно
                     continue
