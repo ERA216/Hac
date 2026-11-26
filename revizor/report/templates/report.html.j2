@@ -106,6 +106,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--soft);padding:1px
   <button data-tab="reqs">Требования</button>
   <button data-tab="questions">Уточняющие вопросы</button>
   <button data-tab="checklist">Чек-лист</button>
+  <button data-tab="fixes">Было → стало</button>
   <button data-tab="tests">Тест-кейсы</button>
   <button data-tab="run">Как работал агент</button>
 </nav>
@@ -114,6 +115,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--soft);padding:1px
 <section class="panel" id="p-reqs"></section>
 <section class="panel" id="p-questions"></section>
 <section class="panel" id="p-checklist"></section>
+<section class="panel" id="p-fixes"></section>
 <section class="panel" id="p-tests"></section>
 <section class="panel" id="p-run"></section>
 </div>
@@ -188,12 +190,14 @@ function renderDefects(){
       <input id="f-q" placeholder="Поиск по дефектам" value="${esc(state.q)}">
       <label class="meta"><input type="checkbox" id="f-open" ${state.open?'checked':''}> только открытые</label>
       <span class="meta">Показано: ${list.length} из ${D.findings.length}</span>
+      <button class="btn ghost" id="dl-csv" title="Для Excel и импорта в Jira">Скачать CSV</button>
     </div>
     ${list.map(defectCard).join('') || '<p class="meta">Нет дефектов по выбранным фильтрам.</p>'}`;
   document.querySelectorAll('[data-sev]').forEach(b => b.onclick = () => { const s=b.dataset.sev; state.sev.has(s)?state.sev.delete(s):state.sev.add(s); renderDefects(); });
   $('f-crit').onchange = e => { state.crit = e.target.value; renderDefects(); };
   $('f-q').oninput = e => { state.q = e.target.value.toLowerCase(); clearTimeout(window._t); window._t = setTimeout(() => { renderDefects(); $('f-q').focus(); const v=$('f-q').value; $('f-q').setSelectionRange(v.length,v.length); }, 250); };
   $('f-open').onchange = e => { state.open = e.target.checked; renderDefects(); };
+  $('dl-csv').onclick = downloadDefectsCsv;
   document.querySelectorAll('.quote').forEach(q => q.onclick = () => goLine(+q.dataset.line));
 }
 
@@ -274,6 +278,33 @@ function renderChecklist(){
     </tbody></table></div>` : '<p class="meta">В документе нет чек-листа ревью.</p>';
   document.querySelectorAll('[data-go2]').forEach(a => a.onclick = ev => { ev.preventDefault(); openTab('defects'); state.open=false; renderDefects(); setTimeout(() => document.getElementById(a.dataset.go2)?.scrollIntoView({behavior:'smooth', block:'center'}), 50); });
 }
+// ---------- CSV для Excel и Jira: разделитель «;», UTF-8 с BOM
+function downloadDefectsCsv(){
+  const cell = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const prio = {critical:'Highest', major:'High', minor:'Low'};
+  const rows = [['ID','Критичность','Приоритет Jira','Критерий','Требования','Заголовок','Проблема','Что исправить','Предлагаемая формулировка','Где в документе','Статус']];
+  for (const f of D.findings) rows.push([f.fid, SEV[f.severity], prio[f.severity], crit(f.criterion), f.requirement_ids.join(', '), f.title,
+    f.problem, f.recommendation, f.rewrite, f.evidence.map(e => e.location).join('; '),
+    f.status === 'resolved' ? 'закрыт уточнением' : f.status === 'changed' ? 'изменён' : 'открыт']);
+  const csv = '﻿' + rows.map(r => r.map(cell).join(';')).join('\r\n');
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
+  link.download = 'defects.csv'; link.click();
+}
+
+// ---------- было → стало
+function renderFixes(){
+  const fixes = D.findings.filter(f => f.rewrite && f.status !== 'resolved');
+  $('p-fixes').innerHTML = fixes.length ? `<p class="meta">Готовые формулировки, предложенные агентом. «(требует подтверждения)» — вариант нужно согласовать с владельцем ТЗ.</p>
+    ${fixes.map(f => { const r = reqById[f.requirement_ids[0]]; const was = r ? r.evidence.quote : (f.evidence[0] || {}).quote;
+      return `<article class="card sev-${f.severity}"><h3><span class="pill ${f.severity}">${SEV[f.severity]}</span>${esc(f.fid)}. ${esc(f.title)}</h3>
+        <div>${f.requirement_ids.map(reqChip).join('')}</div>
+        <dl><dt>Было</dt><dd><span class="quote" data-line="${r ? r.evidence.line_start : ''}">«${esc(was)}»</span></dd>
+        <dt>Стало</dt><dd><div class="rewrite" style="margin-top:0">${esc(f.rewrite)}</div></dd></dl></article>`; }).join('')}`
+    : '<p class="meta">Исправленных формулировок нет.</p>';
+  document.querySelectorAll('#p-fixes .quote').forEach(q => q.onclick = () => goLine(+q.dataset.line));
+}
+
 function renderTests(){
   $('p-tests').innerHTML = D.tests.length ? `<p class="meta">Тест-кейсы, которых не хватает в критериях приёмки. Ожидаемый результат выведен из требований.</p>
     <div class="scroll"><table><thead><tr><th>ID</th><th>Требования</th><th>Сценарий</th><th>Исходные условия</th><th>Действие</th><th>Ожидаемый результат</th><th>Что не покрыто</th></tr></thead><tbody>
@@ -299,7 +330,7 @@ function renderRun(){
       <tr><th>Модель</th><td>${esc(p.provider)} / ${esc(p.model)}; фактически: ${esc(p.model_versions.join(', '))}</td></tr>
       <tr><th>Версия агента</th><td>${esc(p.agent_version)}</td></tr></tbody></table></div>`;
 }
-renderDefects(); renderDoc(); renderReqs(); renderQuestions(); renderChecklist(); renderTests(); renderRun();
+renderDefects(); renderDoc(); renderReqs(); renderQuestions(); renderChecklist(); renderFixes(); renderTests(); renderRun();
 if (location.hash) { const el = document.querySelector(location.hash); if (el) el.scrollIntoView(); }
 </script>
 </body>

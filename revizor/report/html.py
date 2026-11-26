@@ -3,7 +3,7 @@
 Строится из данных отчёта (report.json) и исходного документа, поэтому HTML можно
 пересобрать для любого сохранённого прогона:
 
-    python -m revizor.report.html reports/report.json examples/requirements.md
+    python -m revizor.report reports/report.json examples/requirements.md
 
 Возможности: исходный документ с подсветкой проблемных строк, фильтры дефектов,
 тепловая карта «требование × критерий», форма ответов на уточняющие вопросы
@@ -70,7 +70,7 @@ def render_html(report: dict, doc: Document) -> str:
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if len(argv) < 2:
-        print("Использование: python -m revizor.report.html <report.json> <документ> [<report.html>]")
+        print("Использование: python -m revizor.report <report.json> <документ> [<report.html>]")
         return 2
     report_path, doc_path = Path(argv[0]), Path(argv[1])
     out = Path(argv[2]) if len(argv) > 2 else report_path.with_suffix(".html")

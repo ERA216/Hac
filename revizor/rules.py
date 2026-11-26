@@ -686,6 +686,70 @@ def check_fintech_checklist(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     return hits
 
 
+# --- одна и та же денежная величина с разными границами в разных местах документа
+_NUM = r"\d{1,3}(?:[   ]\d{3})+|\d+"
+_RANGE = re.compile(rf"(?<![\d:.,])(?:от\s+)?({_NUM})\s*(?:–|—|-|до)\s*({_NUM})(?![\d:.,]\d)")
+_MONEY_MARK = re.compile(r"₸|тенге|\bKZT\b|тиын|руб|\$|сумм|порог|лимит|комисси|amount|limit|fee", re.I)
+_QUANTITY_FAMILIES = {
+    "сумма": re.compile(r"сумм|amount|\bsum\b", re.I),
+    "порог/лимит": re.compile(r"порог|лимит|threshold|\blimit", re.I),
+    "комиссия": re.compile(r"комисси|\bfee\b", re.I),
+}
+_FAMILY_PRIORITY = ["комиссия", "порог/лимит", "сумма"]  # от самой конкретной величины к самой общей
+
+
+def _to_int(s: str) -> int:
+    return int(re.sub(r"\D", "", s))
+
+
+def check_range_consistency(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    """«Ф-2: от 100 до 500 000 ₸» против «API: amount 1–1 000 000» — у одной величины разные границы."""
+    by_family: dict[str, list[tuple[tuple[int, int], int, str]]] = defaultdict(list)
+    for ln in _content_lines(doc):
+        if not _MONEY_MARK.search(ln.text):
+            continue
+        for m in _RANGE.finditer(ln.text):
+            lo, hi = _to_int(m.group(1)), _to_int(m.group(2))
+            if lo >= hi or hi < 10:  # «1–3», перевёрнутые и вырожденные диапазоны — не границы сумм
+                continue
+            # диапазон относится к самой конкретной величине, названной в строке: «Комиссия 1% от суммы,
+            # от 50 до 1 000» — это комиссия; «amount … Порог в тенге» — порог; «сумма» — только если иного нет
+            family = next((f for f in _FAMILY_PRIORITY if _QUANTITY_FAMILIES[f].search(ln.text)), None)
+            if family:
+                by_family[family].append(((lo, hi), ln.no, m.group(0).strip()))
+    hits = []
+    reported: set[frozenset[int]] = set()
+    for family, items in by_family.items():
+        bounds = {b for b, _, _ in items}
+        if len(bounds) < 2:
+            continue
+        lines = frozenset(no for _, no, _ in items)
+        if lines in reported:  # та же пара строк уже описана для другой величины
+            continue
+        reported.add(lines)
+        first_by_bounds: dict[tuple[int, int], tuple[int, str]] = {}
+        for b, no, text in items:
+            first_by_bounds.setdefault(b, (no, text))
+        shown = list(first_by_bounds.items())[:3]
+        ranges = "; ".join(f"«{text}» (строка {no})" for _, (no, text) in shown)
+        hits.append(
+            RuleHit(
+                rule="R-RANGE",
+                criterion="consistent",
+                severity="critical",
+                title=f"Разные границы величины «{family}» в разных местах документа",
+                problem=(
+                    f"Для одной и той же величины ({family}) документ задаёт разные диапазоны: {ranges}. "
+                    "Валидация в интерфейсе, API и проверке требований будет расходиться: значение, допустимое "
+                    "в одном месте, будет отклонено в другом."
+                ),
+                recommendation="Оставить один диапазон, указать его в одном месте и ссылаться на него из остальных разделов.",
+                evidence=[loc.line_evidence(no) for _, (no, _) in shown],
+            )
+        )
+    return hits
+
+
 ALL_RULES = [
     check_language,
     check_placeholders,
@@ -693,6 +757,7 @@ ALL_RULES = [
     check_template_sections,
     check_requirement_ids,
     check_fintech_checklist,
+    check_range_consistency,
     check_money_units,
     check_http,
     check_status_codes,
