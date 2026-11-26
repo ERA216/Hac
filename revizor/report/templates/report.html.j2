@@ -236,7 +236,14 @@ function renderReqs(){
     <div class="scroll"><table><thead><tr><th>ID</th><th>ID или место в документе</th><th>Тип</th><th>Краткая формулировка</th><th>Цитата</th><th>Место</th></tr></thead>
     <tbody>${D.requirements.map(r => `<tr><td><b>${r.rid}</b></td><td>${esc(r.source_id || '— (нет номера)')}</td><td>${esc(D.kind_names[r.kind] || r.kind)}</td><td>${esc(r.summary)}</td><td><span class="quote" data-line="${r.evidence.line_start}">«${esc(r.evidence.quote)}»</span></td><td>${esc(r.evidence.location)}</td></tr>`).join('')}</tbody></table></div>
     ${D.trace.length ? `<h3 style="margin-top:24px">Трассируемость</h3><div class="scroll"><table><thead><tr><th>Требование</th><th>Проверяется критериями приёмки</th><th>Реализуется</th><th>Замечание</th></tr></thead><tbody>
-      ${D.trace.map(t => `<tr><td><b>${t.requirement_id}</b> ${esc((reqById[t.requirement_id]||{}).source_id||'')}</td><td>${t.verified_by.join(', ') || '<span class="pill critical">нет</span>'}</td><td>${t.implemented_by.join(', ') || '—'}</td><td>${esc(t.note)}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+      ${D.trace.map(t => `<tr><td><b>${t.requirement_id}</b> ${esc((reqById[t.requirement_id]||{}).source_id||'')}</td><td>${t.verified_by.join(', ') || '<span class="pill critical">нет</span>'}</td><td>${t.implemented_by.join(', ') || '—'}</td><td>${esc(t.note)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${(D.acceptance_checks || []).length ? `<h3 style="margin-top:24px">Сверка критериев приёмки с требованиями</h3>
+      <p class="meta">Ожидаемый результат каждой строки выведен только из требований и сравнён с указанным в строке.</p>
+      <div class="scroll"><table><thead><tr><th>Строка критерия</th><th>Требование</th><th>По требованиям</th><th>В критерии</th><th>Вывод</th><th>Дефект</th></tr></thead><tbody>
+      ${D.acceptance_checks.map(c => `<tr><td><span class="quote" data-line="${c.acceptance.line_start || ''}">«${esc(c.acceptance.quote)}»</span></td><td>${c.requirement_ids.join(', ') || '—'}</td><td>${esc(c.expected_by_requirements)}</td><td>${esc(c.stated_expected)}</td>
+        <td><span class="pill ${c.verdict === 'противоречит' ? 'critical' : c.verdict === 'совпадает' ? 'ok' : ''}">${esc(c.verdict)}</span></td><td>${c.finding_id ? `<a href="#${c.finding_id}" data-go3="${c.finding_id}">${c.finding_id}</a>` : '—'}</td></tr>`).join('')}
+      </tbody></table></div>` : ''}`;
+  document.querySelectorAll('[data-go3]').forEach(a => a.onclick = ev => { ev.preventDefault(); openTab('defects'); state.open = false; state.sev = new Set(['critical','major','minor']); renderDefects(); setTimeout(() => document.getElementById(a.dataset.go3)?.scrollIntoView({behavior:'smooth', block:'center'}), 50); });
   document.querySelectorAll('#p-reqs .quote').forEach(q => q.onclick = () => goLine(+q.dataset.line));
 }
 

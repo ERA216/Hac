@@ -187,6 +187,7 @@ def to_json(state: RunState, llm: LLMClient) -> dict:
         "candidates": [c.model_dump() for c in state.candidates],
         "questions": [q.model_dump() for q in state.questions],
         "tests": [t.model_dump() for t in state.tests],
+        "acceptance_checks": [c.model_dump() for c in state.acceptance],
         "trace": [t.model_dump() for t in state.trace],
         "checklist": [c.model_dump() for c in state.checklist],
         "rejected": [r.model_dump() for r in state.rejected],

@@ -153,7 +153,33 @@ def _review(name):
                 rewrite="",
             )
         )
-    return ReviewOut(findings=findings, suggested_tests=tests)
+    checks = []
+    if name == "qa":  # построчная сверка критериев приёмки: одна строка совпадает, одна противоречит Ф-2
+        checks = [
+            dict(
+                acceptance_quote="Итог 50 000 ₸ и один push",
+                acceptance_line=63,
+                requirement_ids=["R-03"],
+                requirement_quote="клиент получает push",
+                requirement_line=39,
+                expected_by_requirements="Итог 50 000 ₸, один push",
+                stated_expected="Итог 50 000 ₸ и один push",
+                verdict="совпадает",
+                explanation="Совпадает.",
+            ),
+            dict(
+                acceptance_quote="Февральский счётчик вырос на 4 000 ₸",
+                acceptance_line=64,
+                requirement_ids=["R-02"],
+                requirement_quote="Месяц определяется по дате совершения покупки в Алматы",
+                requirement_line=38,
+                expected_by_requirements="Покупка 31 января — январский счётчик",
+                stated_expected="Февральский счётчик вырос на 4 000 ₸",
+                verdict="противоречит",
+                explanation="По Ф-2 месяц — по дате покупки (январь), строка относит её к февралю.",
+            ),
+        ]
+    return ReviewOut(findings=findings, suggested_tests=tests, acceptance_checks=checks)
 
 
 class FakeLLM(LLMClient):

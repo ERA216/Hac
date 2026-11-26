@@ -72,9 +72,27 @@ class TestCaseOut(BaseModel):
     gap: str = Field(description="Что сейчас не покрыто критериями приёмки")
 
 
+AcceptanceVerdict = Literal["совпадает", "противоречит", "не определено требованиями"]
+
+
+class AcceptanceCheckOut(BaseModel):
+    acceptance_quote: str = Field(description="Дословная цитата строки критерия приёмки")
+    acceptance_line: int
+    requirement_ids: list[str] = Field(description="R-xx требований, которые проверяет строка")
+    requirement_quote: str = Field(description="Дословная цитата требования, из которого выведен ожидаемый результат")
+    requirement_line: int
+    expected_by_requirements: str = Field(description="Ожидаемый результат, выведенный только из требований")
+    stated_expected: str = Field(description="Ожидаемый результат, указанный в строке критерия")
+    verdict: AcceptanceVerdict
+    explanation: str = Field(description="В чём совпадение или расхождение, с числами")
+
+
 class ReviewOut(BaseModel):
     findings: list[FindingOut]
     suggested_tests: list[TestCaseOut]
+    acceptance_checks: list[AcceptanceCheckOut] = Field(
+        description="Только у тестировщика: по одной записи на каждую строку критериев приёмки; у остальных — пусто"
+    )
 
 
 class TraceLinkOut(BaseModel):
@@ -200,6 +218,19 @@ class Question(BaseModel):
     requirement_ids: list[str] = []
     blocking: bool = False
     answer: str = ""
+
+
+class AcceptanceCheck(BaseModel):
+    """Построчная сверка критерия приёмки с требованием (выход тестировщика)."""
+
+    acceptance: Evidence
+    requirement: Evidence
+    requirement_ids: list[str] = []
+    expected_by_requirements: str
+    stated_expected: str
+    verdict: str
+    explanation: str
+    finding_id: str = ""  # итоговый дефект D-xx, если строка противоречит требованию
 
 
 class TestCase(BaseModel):

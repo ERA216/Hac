@@ -112,6 +112,18 @@
 {% endfor %}
 {% endif %}
 
+{% if state.acceptance %}
+### Сверка критериев приёмки с требованиями
+
+Для каждой строки критериев приёмки агент-тестировщик вывел ожидаемый результат только из требований и сравнил его с указанным в строке.
+
+| Строка критерия | Требование | По требованиям | В критерии | Вывод | Дефект |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+{% for c in state.acceptance %}
+| «{{ c.acceptance.quote | cell }}» ({{ c.acceptance.location | cell }}) | {{ c.requirement_ids | join(", ") or "—" }} | {{ c.expected_by_requirements | cell }} | {{ c.stated_expected | cell }} | {% if c.verdict == "противоречит" %}❌{% elif c.verdict == "совпадает" %}✅{% else %}➖{% endif %} {{ c.verdict }} | {{ c.finding_id or "—" }} |
+{% endfor %}
+{% endif %}
+
 {% if state.checklist %}
 ### 4.4. Чек-лист «Ревью требований» (заполнен агентом)
 

@@ -31,6 +31,8 @@ from .document import Document
 from .llm import BudgetExceeded, CacheMiss, FatalLLMError, LLMClient, LLMError, QuotaExhausted
 from .rules import run_rules
 from .schemas import (
+    AcceptanceCheck,
+    AcceptanceCheckOut,
     ChecklistRow,
     Evidence,
     Finding,
@@ -93,6 +95,7 @@ class RunState:
     rejected: list[Rejected] = field(default_factory=list)
     questions: list[Question] = field(default_factory=list)
     tests: list[TestCase] = field(default_factory=list)
+    acceptance: list[AcceptanceCheck] = field(default_factory=list)  # построчная сверка критериев приёмки
     trace: list[TraceLinkOut] = field(default_factory=list)
     checklist: list[ChecklistRow] = field(default_factory=list)
     verdict: VerdictOut | None = None
@@ -356,6 +359,8 @@ class Pipeline:
                 state.candidates.append(self._from_out(state, loc, f, lens.name))
             for tc in out.suggested_tests:
                 state.tests.append(TestCase(tid=f"T-{len(state.tests) + 1:02d}", **tc.model_dump()))
+            for ac in out.acceptance_checks:
+                self._add_acceptance_check(state, loc, ac, lens.name)
             note = f"{len(out.findings)} находок" + (f", {len(out.suggested_tests)} тест-кейсов" if out.suggested_tests else "")
             state.steps.append(StepRecord(title=lens.title, kind="LLM", seconds=dt, note=note))
 
@@ -520,6 +525,44 @@ class Pipeline:
             f"; добавлено пропущенных судьёй {len(orphans)}" if orphans else ""
         )
 
+    def _add_acceptance_check(self, state: RunState, loc: QuoteLocator, ac: AcceptanceCheckOut, source: str) -> None:
+        """Строка критерия приёмки, сверенная с требованием. «Противоречит» — сразу кандидат в критичный дефект."""
+        state.quotes_checked += 2
+        acc = loc.locate(ac.acceptance_quote, ac.acceptance_line)
+        req = loc.locate(ac.requirement_quote, ac.requirement_line)
+        state.quotes_verified += acc.verified + req.verified
+        known = {r.rid for r in state.requirements}
+        req_ids = [r for r in ac.requirement_ids if r in known] or self._req_ids_for_lines(state, [acc, req])
+        check = AcceptanceCheck(
+            acceptance=acc,
+            requirement=req,
+            requirement_ids=req_ids,
+            expected_by_requirements=ac.expected_by_requirements.strip(),
+            stated_expected=ac.stated_expected.strip(),
+            verdict=ac.verdict,
+            explanation=ac.explanation.strip(),
+        )
+        state.acceptance.append(check)
+        if ac.verdict != "противоречит":
+            return
+        req_ref = next((r.source_id for r in state.requirements if r.rid in req_ids and r.source_id), "требованию")
+        cand = Finding(
+            fid=self._next_cid(),
+            requirement_ids=req_ids,
+            criterion="consistent",
+            severity="critical",
+            title=f"Критерий приёмки противоречит {req_ref}",
+            problem=(
+                f"По требованию ожидается: {check.expected_by_requirements}. В критерии приёмки указано: "
+                f"{check.stated_expected}. {check.explanation}"
+            ),
+            recommendation="Согласовать требование и критерий приёмки: исправить одно из них и зафиксировать правило явно.",
+            evidence=dedupe_evidence([acc, req]),
+            sources=[source],
+        )
+        check.finding_id = cand.fid  # после судьи заменится на номер итогового дефекта
+        state.candidates.append(cand)
+
     def _number_findings(self, state: RunState, _) -> dict[str, str]:
         req_order = {r.rid: i for i, r in enumerate(state.requirements)}
 
@@ -534,6 +577,9 @@ class Pipeline:
             f.fid = f"D-{i:02d}"
             for c in f.candidate_ids or []:
                 cid_to_d[c] = f.fid
+        for check in state.acceptance:
+            if check.finding_id.startswith("C-"):
+                check.finding_id = cid_to_d.get(check.finding_id, "")
         return cid_to_d
 
     def _clarify(self, state: RunState, base_ctx: dict, reqs_text: str) -> str:
