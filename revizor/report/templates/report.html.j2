@@ -242,6 +242,12 @@ function renderReqs(){
       <div class="scroll"><table><thead><tr><th>Строка критерия</th><th>Требование</th><th>По требованиям</th><th>В критерии</th><th>Вывод</th><th>Дефект</th></tr></thead><tbody>
       ${D.acceptance_checks.map(c => `<tr><td><span class="quote" data-line="${c.acceptance.line_start || ''}">«${esc(c.acceptance.quote)}»</span></td><td>${c.requirement_ids.join(', ') || '—'}</td><td>${esc(c.expected_by_requirements)}</td><td>${esc(c.stated_expected)}</td>
         <td><span class="pill ${c.verdict === 'противоречит' ? 'critical' : c.verdict === 'совпадает' ? 'ok' : ''}">${esc(c.verdict)}</span></td><td>${c.finding_id ? `<a href="#${c.finding_id}" data-go3="${c.finding_id}">${c.finding_id}</a>` : '—'}</td></tr>`).join('')}
+      </tbody></table></div>` : ''}
+    ${(D.pair_checks || []).length ? `<h3 style="margin-top:24px">Попарная сверка требований</h3>
+      <p class="meta">Пары требований об одном и том же действии или величине: агент подобрал сценарий, где применимы оба, и вывел результат по каждому отдельно.</p>
+      <div class="scroll"><table><thead><tr><th>Предмет</th><th>Первое требование</th><th>Второе требование</th><th>Сценарий</th><th>По первому</th><th>По второму</th><th>Вывод</th><th>Дефект</th></tr></thead><tbody>
+      ${D.pair_checks.map(c => `<tr><td>${esc(c.subject)}</td><td><span class="quote" data-line="${c.first.line_start || ''}">«${esc(c.first.quote)}»</span></td><td><span class="quote" data-line="${c.second.line_start || ''}">«${esc(c.second.quote)}»</span></td><td>${esc(c.scenario)}</td><td>${esc(c.first_result)}</td><td>${esc(c.second_result)}</td>
+        <td><span class="pill ${c.verdict === 'противоречат' ? 'critical' : c.verdict === 'совместимы' ? 'ok' : ''}">${esc(c.verdict)}</span></td><td>${c.finding_id ? `<a href="#${c.finding_id}" data-go3="${c.finding_id}">${c.finding_id}</a>` : '—'}</td></tr>`).join('')}
       </tbody></table></div>` : ''}`;
   document.querySelectorAll('[data-go3]').forEach(a => a.onclick = ev => { ev.preventDefault(); openTab('defects'); state.open = false; state.sev = new Set(['critical','major','minor']); renderDefects(); setTimeout(() => document.getElementById(a.dataset.go3)?.scrollIntoView({behavior:'smooth', block:'center'}), 50); });
   document.querySelectorAll('#p-reqs .quote').forEach(q => q.onclick = () => goLine(+q.dataset.line));

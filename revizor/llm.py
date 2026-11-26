@@ -427,8 +427,16 @@ class LLMClient:
     def model_versions(self) -> list[str]:
         return sorted({c.model_version for c in self.calls if c.model_version})
 
-    def _cache_key(self, system: str, user: str, schema: type[BaseModel]) -> str:
-        payload = json.dumps([self.provider, self.model, system, user, inline_schema(schema)], ensure_ascii=False, sort_keys=True)
+    @property
+    def current_model(self) -> str:
+        """Модель, которая отвечает сейчас: после предполётной проверки или переключения это может быть резервная."""
+        return self._backend.model if self._backend is not None else self.model
+
+    def _cache_key(self, system: str, user: str, schema: type[BaseModel], model: str | None = None) -> str:
+        """Ключ кэша — по модели, которая отвечает (а не по указанной в настройках): иначе ответ резервной
+        модели, полученный при перегрузке основной, подставлялся бы потом вместо ответа основной."""
+        model = model or self.current_model
+        payload = json.dumps([self.provider, model, system, user, inline_schema(schema)], ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _prompt_key(self, system: str, user: str, schema: type[BaseModel]) -> str:
@@ -463,7 +471,7 @@ class LLMClient:
                 self.calls.append(
                     CallRecord(
                         agent=agent,
-                        model=self.model,
+                        model=data.get("model") or self.model,
                         cached=True,
                         seconds=0.0,
                         **{k: data["meta"].get(k, 0) for k in ("prompt_tokens", "output_tokens", "thoughts_tokens")},
@@ -516,11 +524,13 @@ class LLMClient:
         )
         self.calls.append(record)
         if path:
+            # ответила, возможно, уже резервная модель — сохраняем под её ключом
+            path = path.with_name(f"{self._cache_key(system, user, schema, record.model)}.json")
             try:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(
                     json.dumps(
-                        {"agent": agent, "model": self.model, "prompt_key": prompt_key, "text": text, "meta": meta},
+                        {"agent": agent, "model": record.model, "prompt_key": prompt_key, "text": text, "meta": meta},
                         ensure_ascii=False,
                         indent=1,
                     ),

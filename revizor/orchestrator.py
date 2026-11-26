@@ -37,6 +37,8 @@ from .schemas import (
     Evidence,
     Finding,
     FindingOut,
+    PairCheck,
+    PairCheckOut,
     Question,
     Rejected,
     Requirement,
@@ -96,6 +98,7 @@ class RunState:
     questions: list[Question] = field(default_factory=list)
     tests: list[TestCase] = field(default_factory=list)
     acceptance: list[AcceptanceCheck] = field(default_factory=list)  # построчная сверка критериев приёмки
+    pairs: list[PairCheck] = field(default_factory=list)  # попарная сверка требований об одном действии
     trace: list[TraceLinkOut] = field(default_factory=list)
     checklist: list[ChecklistRow] = field(default_factory=list)
     verdict: VerdictOut | None = None
@@ -386,11 +389,17 @@ class Pipeline:
                 known_findings=short_findings(state.candidates),
                 max_findings=self.max_findings,
             )
+            for pc in out.pair_checks:
+                self._add_pair_check(state, loc, pc)
             for f in out.findings:
                 state.candidates.append(self._from_out(state, loc, f, "consistency"))
             known = {r.rid for r in state.requirements}
             state.trace = [t for t in out.trace if t.requirement_id in known]
-            return f"{len(out.findings)} находок, {len(state.trace)} связей трассировки"
+            conflicts = sum(p.verdict == "противоречат" for p in state.pairs)
+            return (
+                f"{len(out.findings)} находок, пар сверено {len(state.pairs)} (противоречий {conflicts}), "
+                f"{len(state.trace)} связей трассировки"
+            )
 
         self._step(state, "Агент согласованности набора", "LLM", consistency)
 
@@ -577,6 +586,47 @@ class Pipeline:
         check.finding_id = cand.fid  # после судьи заменится на номер итогового дефекта
         state.candidates.append(cand)
 
+    def _add_pair_check(self, state: RunState, loc: QuoteLocator, pc: PairCheckOut) -> None:
+        """Пара требований об одном действии. «Противоречат» — сразу кандидат в критичный дефект."""
+        state.quotes_checked += 2
+        first = loc.locate(pc.first_quote, pc.first_line)
+        second = loc.locate(pc.second_quote, pc.second_line)
+        state.quotes_verified += first.verified + second.verified
+        known = {r.rid for r in state.requirements}
+        req_ids = [r for r in pc.requirement_ids if r in known] or self._req_ids_for_lines(state, [first, second])
+        check = PairCheck(
+            subject=pc.subject.strip(),
+            first=first,
+            second=second,
+            requirement_ids=req_ids,
+            scenario=pc.scenario.strip(),
+            first_result=pc.first_result.strip(),
+            second_result=pc.second_result.strip(),
+            verdict=pc.verdict,
+            explanation=pc.explanation.strip(),
+        )
+        state.pairs.append(check)
+        if pc.verdict != "противоречат":
+            return
+        refs = [r.source_id for r in state.requirements if r.rid in req_ids and r.source_id]
+        names = " и ".join(dict.fromkeys(refs)) if len(set(refs)) > 1 else "Требования"
+        cand = Finding(
+            fid=self._next_cid(),
+            requirement_ids=req_ids,
+            criterion="consistent",
+            severity="critical",
+            title=f"{names} противоречат друг другу ({check.subject})",
+            problem=(
+                f"Сценарий: {check.scenario}. По первому требованию: {check.first_result}. "
+                f"По второму: {check.second_result}. {check.explanation}"
+            ),
+            recommendation="Согласовать требования: выбрать одно правило для этого сценария и записать его явно в обоих местах.",
+            evidence=dedupe_evidence([first, second]),
+            sources=["consistency"],
+        )
+        check.finding_id = cand.fid  # после судьи заменится на номер итогового дефекта
+        state.candidates.append(cand)
+
     def _number_findings(self, state: RunState, _) -> dict[str, str]:
         req_order = {r.rid: i for i, r in enumerate(state.requirements)}
 
@@ -591,7 +641,8 @@ class Pipeline:
             f.fid = f"D-{i:02d}"
             for c in f.candidate_ids or []:
                 cid_to_d[c] = f.fid
-        for check in state.acceptance:
+        checks: list[AcceptanceCheck | PairCheck] = [*state.acceptance, *state.pairs]
+        for check in checks:
             if check.finding_id.startswith("C-"):
                 check.finding_id = cid_to_d.get(check.finding_id, "")
         return cid_to_d

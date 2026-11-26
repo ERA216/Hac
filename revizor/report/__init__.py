@@ -200,6 +200,7 @@ def to_json(state: RunState, llm: LLMClient) -> dict:
         "questions": [q.model_dump() for q in state.questions],
         "tests": [t.model_dump() for t in state.tests],
         "acceptance_checks": [c.model_dump() for c in state.acceptance],
+        "pair_checks": [c.model_dump() for c in state.pairs],
         "trace": [t.model_dump() for t in state.trace],
         "checklist": [c.model_dump() for c in state.checklist],
         "rejected": [r.model_dump() for r in state.rejected],

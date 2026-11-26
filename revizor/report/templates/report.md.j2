@@ -124,6 +124,18 @@
 {% endfor %}
 {% endif %}
 
+{% if state.pairs %}
+### Попарная сверка требований
+
+Агент согласованности нашёл пары требований, которые регулируют одно и то же действие или величину, подобрал сценарий, где применимы оба, и вывел результат по каждому отдельно.
+
+| Предмет | Первое требование | Второе требование | Сценарий | По первому | По второму | Вывод | Дефект |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+{% for c in state.pairs %}
+| {{ c.subject | cell }} | «{{ c.first.quote | cell }}» ({{ c.first.location | cell }}) | «{{ c.second.quote | cell }}» ({{ c.second.location | cell }}) | {{ c.scenario | cell }} | {{ c.first_result | cell }} | {{ c.second_result | cell }} | {% if c.verdict == "противоречат" %}❌{% elif c.verdict == "совместимы" %}✅{% else %}➖{% endif %} {{ c.verdict }} | {{ c.finding_id or "—" }} |
+{% endfor %}
+{% endif %}
+
 {% if state.checklist %}
 ### 4.4. Чек-лист «Ревью требований» (заполнен агентом)
 

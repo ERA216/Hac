@@ -108,7 +108,37 @@ class TraceLinkOut(BaseModel):
     note: str
 
 
+PairVerdict = Literal["совместимы", "противоречат", "не определено"]
+
+
+class PairCheckOut(BaseModel):
+    subject: str = Field(
+        description="Что регулируют оба требования: одно действие, величина или состояние (например, «отправка push»)"
+    )
+    first_quote: str = Field(description="Дословная цитата первого требования")
+    first_line: int
+    second_quote: str = Field(description="Дословная цитата второго требования (другой пункт, может быть соседним)")
+    second_line: int
+    requirement_ids: list[str] = Field(description="R-xx обоих требований")
+    scenario: str = Field(
+        description=(
+            "Конкретный сценарий, в котором применимы оба требования, до вывода: исходное состояние, "
+            "события по порядку, даты и числа"
+        )
+    )
+    first_result: str = Field(description="Что должно произойти в этом сценарии по первому требованию")
+    second_result: str = Field(description="Что должно произойти в этом сценарии по второму требованию")
+    verdict: PairVerdict
+    explanation: str = Field(description="Почему совместимы или в чём именно конфликт")
+
+
 class SetReviewOut(BaseModel):
+    pair_checks: list[PairCheckOut] = Field(
+        description=(
+            "Попарная сверка: по записи на каждую пару разных требований (в том числе соседних пунктов), которые "
+            "регулируют одно и то же действие, величину или состояние"
+        )
+    )
     findings: list[FindingOut]
     trace: list[TraceLinkOut]
 
@@ -237,6 +267,21 @@ class AcceptanceCheck(BaseModel):
     verdict: str
     explanation: str
     finding_id: str = ""  # итоговый дефект D-xx, если строка противоречит требованию
+
+
+class PairCheck(BaseModel):
+    """Попарная сверка двух требований об одном действии (выход агента согласованности)."""
+
+    subject: str
+    first: Evidence
+    second: Evidence
+    requirement_ids: list[str] = []
+    scenario: str
+    first_result: str
+    second_result: str
+    verdict: str
+    explanation: str
+    finding_id: str = ""  # итоговый дефект D-xx, если требования противоречат друг другу
 
 
 class TestCase(BaseModel):

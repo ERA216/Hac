@@ -117,6 +117,19 @@ def test_replay_finds_answer_saved_under_other_model_name(tmp_path):
     assert not_replay.real_calls == 1  # без --replay кэш другой модели не подменяет новую
 
 
+def test_fallback_answer_is_cached_under_the_model_that_answered(tmp_path):
+    # основная m1 перегружена, ответила резервная m2: ответ m2 не должен потом выдаваться за ответ m1
+    c = client([ApiError(504, "DEADLINE_EXCEEDED"), GOOD], tmp_path, fallback_models=["m2"])
+    c.generate("clarifier", "s", "u", ClarifyOut)
+    healthy = client([GOOD], tmp_path)  # m1 снова отвечает
+    healthy.generate("clarifier", "s", "u", ClarifyOut)
+    assert healthy.real_calls == 1
+    again = client([], tmp_path)  # снова на резервной m2 (как после предполётной проверки) — берём из кэша
+    again._backend.model = "m2"
+    again.generate("clarifier", "s", "u", ClarifyOut)
+    assert again.real_calls == 0 and again.calls[0].model == "m2"
+
+
 class PingBackend(ScriptedBackend):
     def __init__(self, alive, **kw):
         super().__init__([GOOD], **kw)

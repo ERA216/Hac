@@ -208,6 +208,34 @@ class FakeLLM(LLMClient):
             return _review(agent)
         if agent == "consistency":
             return SetReviewOut(
+                pair_checks=[
+                    dict(
+                        subject="отправка push",
+                        first_quote="На карту приходится максимум один такой push за календарный месяц",
+                        first_line=39,
+                        second_quote="следующее достижение вызывает push независимо от истории предыдущей настройки",
+                        second_line=40,
+                        requirement_ids=["R-03", "R-04"],
+                        scenario="Порог 50 000, push отправлен 10.03; 15.03 порог поднят до 80 000; 20.03 расходы 80 000",
+                        first_result="Второй push в марте запрещён",
+                        second_result="Push отправляется",
+                        verdict="противоречат",
+                        explanation="Ф-4 требует второй push в месяце, Ф-3 его запрещает.",
+                    ),
+                    dict(
+                        subject="порог",
+                        first_quote="Держатель активной карты KZT задаёт целый порог",
+                        first_line=37,
+                        second_quote="При изменении порога накопленная сумма сохраняется",
+                        second_line=40,
+                        requirement_ids=["R-01", "R-04"],
+                        scenario="Порог меняется с 10 000 на 20 000 при расходах 5 000",
+                        first_result="Новый порог 20 000 допустим",
+                        second_result="Расходы 5 000 сохраняются",
+                        verdict="совместимы",
+                        explanation="Оба выполнимы.",
+                    ),
+                ],
                 findings=[],
                 trace=[
                     dict(requirement_id="R-01", verified_by=[], implemented_by=["R-07"], note="нет критерия приёмки на границы")

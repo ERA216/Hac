@@ -3,7 +3,8 @@
 Правила общие для любых ТЗ (не подогнаны под конкретный документ):
 язык требований (29148 п. 5.2.7), незаполненные шаблоны и пустые разделы,
 смешение денежных единиц, семантика HTTP-методов и кодов ответа, расхождение
-типов параметров API, идентификаторы в строке запроса.
+типов параметров API, идентификаторы в строке запроса, разные границы одной величины,
+ограничение числа действий против безусловного требования того же действия.
 """
 
 from __future__ import annotations
@@ -783,6 +784,66 @@ def check_range_consistency(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     return hits
 
 
+# «максимум один такой push за месяц» + «… вызывает push независимо от истории» — исключение снимает ограничение,
+# а какое правило главнее, не сказано
+_LIMIT = re.compile(
+    r"(?<![\w-])(?:не более|не больше|не чаще|не свыше|максимум|не превышает|только|лишь)\s+"
+    r"(?:чем\s+)?(?:один|одн\w+|1)\s+(?:так\w+\s+|подобн\w+\s+)?([\w-]{3,})",
+    re.I,
+)
+_LIMIT_SKIP = {"раз", "раза", "разу", "чем", "из", "или", "день", "сутки", "месяц", "минуту", "секунду", "час"}
+_OVERRIDE = _w(r"независимо от|вне зависимости от|в любом случае|при любых условиях|всегда")
+_EXPLICIT_PRECEDENCE = re.compile(r"лимит|ограничени|сверх|исключени|приоритет", re.I)
+
+
+def _stem(word: str) -> str:
+    """Грубая основа слова для сравнения форм: «уведомление» и «уведомления», «push» и «push»."""
+    w = word.lower()
+    return w if len(w) <= 5 else w[: len(w) - 2]
+
+
+def check_limit_override(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
+    """Ограничение числа действий и требование того же действия «независимо от…» без указанного приоритета."""
+    lines = list(_content_lines(doc))
+    hits = []
+    seen: set[tuple[int, int]] = set()
+    for ln in lines:
+        for m in _LIMIT.finditer(ln.text):
+            obj = m.group(1)
+            if obj.lower() in _LIMIT_SKIP:
+                continue
+            obj_re = re.compile(rf"(?<![\w-]){re.escape(_stem(obj))}\w*", re.I)
+            for other in lines:
+                if other.no == ln.no or (ln.no, other.no) in seen:
+                    continue
+                override = _OVERRIDE.search(other.text)
+                if not (override and obj_re.search(other.text)):
+                    continue
+                if _EXPLICIT_PRECEDENCE.search(other.text):  # «независимо от лимита» — исключение задано явно
+                    continue
+                seen.add((ln.no, other.no))
+                hits.append(
+                    RuleHit(
+                        rule="R-LIMIT-OVERRIDE",
+                        criterion="consistent",
+                        severity="critical",
+                        title=f"Ограничение на «{obj}» и требование «{obj}» независимо от условий",
+                        problem=(
+                            f"Строка {ln.no} ограничивает число действий («{m.group(0).strip()}»), а строка {other.no} "
+                            f"требует того же действия безусловно («{override.group(0)}»). "
+                            "В сценарии, где ограничение уже исчерпано, а условие второго требования выполнено, "
+                            "выполнить оба требования нельзя, и какое главнее, документ не говорит."
+                        ),
+                        recommendation=(
+                            "Явно указать приоритет: считается ли действие по второму требованию в ограничение первого, "
+                            "и добавить критерий приёмки на этот сценарий."
+                        ),
+                        evidence=[loc.line_evidence(ln.no), loc.line_evidence(other.no)],
+                    )
+                )
+    return hits
+
+
 ALL_RULES = [
     check_language,
     check_placeholders,
@@ -791,6 +852,7 @@ ALL_RULES = [
     check_requirement_ids,
     check_fintech_checklist,
     check_range_consistency,
+    check_limit_override,
     check_prompt_injection,
     check_money_units,
     check_http,
