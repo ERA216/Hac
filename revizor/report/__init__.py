@@ -19,13 +19,24 @@ from .html import AGENT_NAMES, render_html
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 
 
+def _no_html(s: str) -> str:
+    """Текст из документа и ответов модели — не разметка: HTML в нём не должен исполняться в просмотрщике."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _cell(value) -> str:
-    s = "" if value is None else str(value)
+    s = "" if value is None else _no_html(str(value))
     return s.replace("|", "\\|").replace("\r", "").replace("\n", "<br>").strip()
 
 
 def _quote(value: str) -> str:
-    return (value or "").replace("\n", " ").strip()
+    return _no_html(value or "").replace("\n", " ").strip()
+
+
+def _csv_safe(value) -> str:
+    """Защита от CSV-инъекции: «=», «+», «-», «@» в начале ячейки Excel считает формулой."""
+    s = "" if value is None else str(value)
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
 
 
 def _who(value) -> str:
@@ -148,6 +159,7 @@ def render_markdown(state: RunState, llm: LLMClient) -> str:
     env.filters["cell"] = _cell
     env.filters["q"] = _quote
     env.filters["who"] = _who
+    env.filters["t"] = _no_html  # свободный текст (документ, ответы модели) — без исполняемой разметки
     text = env.get_template("report.md.j2").render(**build_context(state, llm))
     # не более одной пустой строки подряд
     out, blank = [], 0
@@ -203,7 +215,12 @@ def render_html_report(state: RunState, llm: LLMClient) -> str:
 
 
 def write_reports(state: RunState, llm: LLMClient, report_path: Path) -> list[Path]:
-    """Отчёт .md (основной), .json (данные) и .html (интерактивный) рядом друг с другом."""
+    """Отчёт .md (основной), .json (данные) и .html (интерактивный) рядом друг с другом.
+
+    Путь можно дать с любым расширением или без него («report.html», «report»): Markdown всегда
+    пишется в .md, иначе HTML-версия затёрла бы его или файл остался бы без расширения.
+    """
+    report_path = report_path.with_suffix(".md")
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_markdown(state, llm), encoding="utf-8")
     data = to_json(state, llm)
@@ -242,19 +259,22 @@ def write_csv(state: RunState, report_path: Path) -> list[Path]:
         for f in state.findings:
             w.writerow(
                 [
-                    f.fid,
-                    SEVERITY_NAMES.get(f.severity, f.severity),
-                    priority.get(f.severity, ""),
-                    criterion_name(f.criterion),
-                    CRITERIA[f.criterion].source if f.criterion in CRITERIA else "",
-                    ", ".join(f.requirement_ids),
-                    f.title,
-                    f.problem,
-                    f.recommendation,
-                    f.rewrite,
-                    "; ".join(e.location for e in f.evidence),
-                    " | ".join(e.quote for e in f.evidence),
-                    {"open": "открыт", "resolved": "закрыт уточнением", "changed": "изменён"}[f.status],
+                    _csv_safe(v)
+                    for v in [
+                        f.fid,
+                        SEVERITY_NAMES.get(f.severity, f.severity),
+                        priority.get(f.severity, ""),
+                        criterion_name(f.criterion),
+                        CRITERIA[f.criterion].source if f.criterion in CRITERIA else "",
+                        ", ".join(f.requirement_ids),
+                        f.title,
+                        f.problem,
+                        f.recommendation,
+                        f.rewrite,
+                        "; ".join(e.location for e in f.evidence),
+                        " | ".join(e.quote for e in f.evidence),
+                        {"open": "открыт", "resolved": "закрыт уточнением", "changed": "изменён"}[f.status],
+                    ]
                 ]
             )
     questions_path = report_path.with_name(report_path.stem + ".questions.csv")
@@ -264,15 +284,18 @@ def write_csv(state: RunState, report_path: Path) -> list[Path]:
         for q in state.questions:
             w.writerow(
                 [
-                    q.qid,
-                    "да" if q.blocking else "нет",
-                    q.addressee,
-                    q.question,
-                    " / ".join(f"{i}. {o}" for i, o in enumerate(q.options, 1)),
-                    q.why,
-                    ", ".join(q.finding_ids),
-                    ", ".join(q.requirement_ids),
-                    q.answer,
+                    _csv_safe(v)
+                    for v in [
+                        q.qid,
+                        "да" if q.blocking else "нет",
+                        q.addressee,
+                        q.question,
+                        " / ".join(f"{i}. {o}" for i, o in enumerate(q.options, 1)),
+                        q.why,
+                        ", ".join(q.finding_ids),
+                        ", ".join(q.requirement_ids),
+                        q.answer,
+                    ]
                 ]
             )
     return [defects_path, questions_path]

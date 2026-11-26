@@ -287,7 +287,8 @@ function renderChecklist(){
 }
 // ---------- CSV для Excel и Jira: разделитель «;», UTF-8 с BOM
 function downloadDefectsCsv(){
-  const cell = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  // защита от CSV-инъекции: «=», «+», «-», «@» в начале ячейки Excel считает формулой
+  const cell = v => { let s = String(v ?? ''); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
   const prio = {critical:'Highest', major:'High', minor:'Low'};
   const rows = [['ID','Критичность','Приоритет Jira','Критерий','Требования','Заголовок','Проблема','Что исправить','Предлагаемая формулировка','Где в документе','Статус']];
   for (const f of D.findings) rows.push([f.fid, SEV[f.severity], prio[f.severity], crit(f.criterion), f.requirement_ids.join(', '), f.title,

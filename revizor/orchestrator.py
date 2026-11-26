@@ -170,6 +170,10 @@ class Pipeline:
             note, ok = f"не выполнен: {e}", False
             if required:
                 raise
+        except Exception as e:  # noqa: BLE001 — неожиданный сбой одного шага не должен терять весь отчёт
+            if required:
+                raise
+            note, ok = f"не выполнен: внутренняя ошибка {e.__class__.__name__}: {str(e)[:200]}", False
         dt = round(time.monotonic() - t0, 1)
         state.steps.append(StepRecord(title=title, kind=kind, seconds=dt, note=note, ok=ok))
         if ok:
@@ -251,7 +255,7 @@ class Pipeline:
                     ctx["numbered"] = numbered_range(doc, a, b)
                     ctx["part"] = f"часть {n} из {len(chunks)} (строки {a}–{b}); выдели требования только из этой части"
                 try:
-                    items.extend(SegmenterAgent(self.llm).call(**ctx).requirements)
+                    part = SegmenterAgent(self.llm).call(**ctx).requirements
                 except FatalLLMError:
                     raise
                 except LLMError as e:
@@ -260,6 +264,16 @@ class Pipeline:
                     state.errors.append(
                         f"Нарезка требований (строки {a}–{b}): LLM недоступна ({e}); использована нарезка по структуре документа"
                     )
+                    continue
+                by_structure = rule_segments(doc, (a, b))
+                if not part and by_structure:  # модель ничего не выделила там, где структура видит требования
+                    by_rules.append(f"{a}–{b}")
+                    part = by_structure
+                    state.errors.append(
+                        f"Нарезка требований (строки {a}–{b}): модель не выделила ни одного требования; "
+                        "использована нарезка по структуре документа"
+                    )
+                items.extend(part)
             unverified = 0
             for i, r in enumerate(items, start=1):
                 ev = loc.locate(r.quote, r.line_start)
@@ -613,6 +627,8 @@ class Pipeline:
     def _recheck(self, state: RunState, loc: QuoteLocator, base_ctx: dict, reqs_text: str, answered: list[Question]) -> str:
         affected_ids = {f for q in answered for f in q.finding_ids}
         affected = [f for f in state.findings if f.fid in affected_ids]
+        if not affected:  # ответы не привязаны ни к одному дефекту — перепроверять нечего, запрос модели не нужен
+            return "ответы не затрагивают дефекты — перепроверка не нужна"
         out = RecheckAgent(self.llm).call(
             **base_ctx, requirements=reqs_text, qa=questions_answers(answered), findings=full_findings(affected)
         )

@@ -1,31 +1,31 @@
 {% macro finding(f) %}
-#### {{ ICON[f.severity] }} {{ f.fid }}. {{ f.title }}
+#### {{ ICON[f.severity] }} {{ f.fid }}. {{ f.title | t }}
 {% if not f.is_open %}
 
-> ✔️ **Закрыто уточнением.** {{ f.status_comment }}
+> ✔️ **Закрыто уточнением.** {{ f.status_comment | t }}
 {% elif f.status == "changed" %}
 
-> ↻ **Изменено после уточнения.** {{ f.status_comment }}
+> ↻ **Изменено после уточнения.** {{ f.status_comment | t }}
 {% endif %}
 
 - **Критичность:** {{ SEV[f.severity] }}
 - **Критерий:** {{ crit_name(f.criterion) }} — {{ criteria[f.criterion].source if f.criterion in criteria else "" }}
 {% if f.requirement_ids %}
-- **Требования:** {% for rid in f.requirement_ids %}{{ rid }}{% if reqs[rid].source_id %} ({{ reqs[rid].source_id }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+- **Требования:** {% for rid in f.requirement_ids %}{{ rid }}{% if reqs[rid].source_id %} ({{ reqs[rid].source_id | t }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
 
 {% endif %}
 - **Где в документе:**
 {% for e in f.evidence %}
-  - «{{ e.quote | q }}» — *{{ e.location }}*
+  - «{{ e.quote | q }}» — *{{ e.location | t }}*
 {% endfor %}
-- **Проблема:** {{ f.problem }}
-- **Что исправить:** {{ f.recommendation }}
+- **Проблема:** {{ f.problem | t }}
+- **Что исправить:** {{ f.recommendation | t }}
 {% if f.rewrite %}
-- **Предлагаемая формулировка:** {{ f.rewrite }}
+- **Предлагаемая формулировка:** {{ f.rewrite | t }}
 {% endif %}
 - **Обнаружили:** {{ f.sources | who }}
 {% endmacro %}
-# Отчёт о проверке требований: «{{ doc.title }}»
+# Отчёт о проверке требований: «{{ doc.title | t }}»
 
 > Отчёт сформирован автоматически агентом **«Ревизор ТЗ»** ({{ agent_version }}) по входному файлу без ручных правок.
 > Все цитаты в отчёте автоматически сверены с исходным документом.
@@ -36,7 +36,7 @@
 · уточняющих вопросов: {{ state.questions | length }}{% if state.questions %} (блокирующих: {{ state.questions | selectattr("blocking") | list | length }}){% endif %}.
 
 {% if state.errors %}
-> ⚠️ **Прогон выполнен не полностью.** Шаги с ошибкой: {{ state.errors | join("; ") }}
+> ⚠️ **Прогон выполнен не полностью.** Шаги с ошибкой: {{ state.errors | join("; ") | t }}
 {% endif %}
 
 ## 1. Паспорт прогона
@@ -47,7 +47,7 @@
 | Входной файл | `{{ doc.path.name }}` (формат {{ doc.fmt | upper }}, строк: {{ doc.lines | length }}{% if doc.pages %}, страниц: {{ doc.pages }}{% endif %}) |
 | SHA-256 файла | `{{ doc.sha256 }}` |
 | Дата и время прогона | {{ state.started_at.strftime("%d.%m.%Y %H:%M") }} (Алматы, UTC+5) |
-| Модель | {{ llm.provider }} / `{{ llm.model }}`{% if llm.model_versions %}; фактическая версия: {% for v in llm.model_versions %}`{{ v }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %} |
+| Модель | {{ llm.provider }} / `{{ llm.model }}`{% if llm.model_versions %}; фактическая версия: {% for v in llm.model_versions %}`{{ v | t }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %} |
 | Версия агента | {{ agent_version | cell }} |
 | Вызовы LLM | {{ calls | length }} (новых: {{ real_calls }}, из кэша: {{ cached_calls }}); токены: вход {{ tokens_in }}, выход {{ tokens_out }} |
 | Длительность | {{ total_seconds }} с |
@@ -139,16 +139,16 @@
 {% for q in state.questions %}
 **{{ q.qid }}.** {% if q.blocking %}⛔ *Блокирующий.* {% endif %}*Кому:* {{ q.addressee }}{% if q.finding_ids %} · *Дефекты:* {{ q.finding_ids | join(", ") }}{% endif %}{% if q.requirement_ids %} · *Требования:* {{ q.requirement_ids | join(", ") }}{% endif %}
 
-{{ q.question }}
+{{ q.question | t }}
 
 {% for o in q.options %}
-{{ loop.index }}. {{ o }}
+{{ loop.index }}. {{ o | t }}
 {% endfor %}
 
-*Зачем:* {{ q.why }}
+*Зачем:* {{ q.why | t }}
 {% if q.answer %}
 
-> **Ответ:** {{ q.answer }}
+> **Ответ:** {{ q.answer | t }}
 {% endif %}
 
 {% else %}
@@ -185,7 +185,7 @@
 **Критичные дефекты** (непроверяемые, противоречивые, неполные формулировки):
 
 {% for f in critical %}
-- **{{ f.fid }}** — {{ f.title }}{% if f.requirement_ids %} ({{ f.requirement_ids | join(", ") }}){% endif %} · *{{ crit_name(f.criterion) }}*
+- **{{ f.fid }}** — {{ f.title | t }}{% if f.requirement_ids %} ({{ f.requirement_ids | join(", ") }}){% endif %} · *{{ crit_name(f.criterion) }}*
 {% else %}
 - нет
 {% endfor %}
@@ -198,13 +198,13 @@
 | Можно начинать тестирование (проектирование тестов)? | {% if state.ready_for_testing %}✅ Да{% else %}❌ Нет{% endif %} |
 
 {% if state.verdict %}
-{{ state.verdict.summary }}
+{{ state.verdict.summary | t }}
 {% endif %}
 
 **Что исправить в первую очередь:**
 
 {% for f in priorities %}
-{{ loop.index }}. **{{ f.fid }}** — {{ f.title }}. {{ f.recommendation }}
+{{ loop.index }}. **{{ f.fid }}** — {{ f.title | t }}. {{ f.recommendation | t }}
 {% else %}
 Срочных исправлений нет.
 {% endfor %}
@@ -228,7 +228,7 @@
 | Шаг | Исполнитель | Время, с | Результат |
 | :--- | :--- | ---: | :--- |
 {% for s in state.steps %}
-| {{ s.title }} | {{ s.kind }} | {{ s.seconds }} | {% if not s.ok %}⚠️ {% endif %}{{ s.note | cell }} |
+| {{ s.title | t }} | {{ s.kind }} | {{ s.seconds }} | {% if not s.ok %}⚠️ {% endif %}{{ s.note | cell }} |
 {% endfor %}
 
 | Агент | Модель | Кэш | Время, с | Токены вход / выход |
@@ -253,7 +253,7 @@
 Цитаты этих находок не найдены в документе, поэтому они не вошли в отчёт.
 
 {% for f in state.unverified %}
-- {{ f.title }} *({{ f.sources | who }})*: «{{ f.evidence[0].quote | q if f.evidence else "" }}»
+- {{ f.title | t }} *({{ f.sources | who }})*: «{{ f.evidence[0].quote | q if f.evidence else "" }}»
 {% endfor %}
 {% endif %}
 

@@ -82,7 +82,6 @@ _SENSITIVE_PARAM = re.compile(
 _NAME_COLS = {"parameter", "параметр", "поле", "field", "name", "имя", "атрибут", "attribute", "наименование", "название"}
 _TYPE_COLS = {"format", "тип", "формат", "type", "тип данных", "data type", "datatype"}
 _LOCATION_COLS = {"in", "где", "расположение", "location", "место", "передача", "источник"}
-_HTTP_CODE = re.compile(r"(?<![\d\s])(?<!\d )\b([1-5]\d\d)\b(?![\s ]?\d{3})")
 
 
 def _is_table_sep(t: str) -> bool:

@@ -87,10 +87,16 @@ with col2:
 
 if use_example:
     st.session_state["doc_path"] = str(EXAMPLE)
-elif uploaded is not None:
-    tmp = Path(tempfile.gettempdir()) / f"revizor_upload{Path(uploaded.name).suffix.lower()}"
-    tmp.write_bytes(uploaded.getvalue())
-    st.session_state["doc_path"] = str(tmp)
+    st.session_state["doc_name"] = EXAMPLE.name
+elif uploaded is not None and st.session_state.get("upload_id") != uploaded.file_id:
+    # только новая загрузка меняет документ: иначе при любом следующем клике виджет с уже загруженным
+    # файлом снова подменял бы выбранный пример
+    st.session_state["upload_id"] = uploaded.file_id
+    # у каждой сессии свой временный файл — одновременные пользователи не перезаписывают документы друг друга
+    fd, tmp_name = tempfile.mkstemp(prefix="revizor_", suffix=Path(uploaded.name).suffix.lower())
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(uploaded.getvalue())
+    st.session_state["doc_path"] = tmp_name
     st.session_state["doc_name"] = uploaded.name
 
 doc_path = st.session_state.get("doc_path")

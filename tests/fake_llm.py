@@ -232,7 +232,7 @@ class FakeLLM(LLMClient):
                     )
                     for i, c in enumerate(cids[1:], start=1)
                 ],
-                rejected=[dict(candidate_id=cids[0], reason="ложное срабатывание")],
+                rejected=[dict(candidate_id=c, reason="ложное срабатывание") for c in cids[:1]],
                 checklist=[
                     dict(item="Требование может быть протестировано", answer="Нет", comment="см. НФТ", candidate_ids=cids[1:2])
                 ],

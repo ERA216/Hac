@@ -52,6 +52,8 @@ def _last(section: str) -> str:
 def rule_segments(doc: Document, line_range: tuple[int, int] | None = None) -> list[RequirementOut]:
     a, b = line_range or (1, len(doc.lines))
     out: list[RequirementOut] = []
+    # в документе без единого заголовка нет «вводного текста до первого раздела» — берём все строки
+    has_sections = any(ln.section for ln in doc.lines)
     in_code = False
     table_row = 0
     prev_table = False
@@ -80,7 +82,7 @@ def rule_segments(doc: Document, line_range: tuple[int, int] | None = None) -> l
                 continue
         quote = clean_line(t)
         # вводный текст до первого раздела, обрывки («или», «404») и заглушки шаблона — не требования
-        if not ln.section or len(quote) < 12 or _PLACEHOLDER.search(quote):
+        if (has_sections and not ln.section) or len(quote) < 12 or _PLACEHOLDER.search(quote):
             continue
         m_id = _ID.match(t)
         m_num = _NUM_ITEM.match(t)

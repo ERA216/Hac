@@ -63,7 +63,8 @@ def build_data(report: dict, doc: Document) -> dict:
 
 def render_html(report: dict, doc: Document) -> str:
     env = Environment(loader=FileSystemLoader(TEMPLATES), autoescape=False)
-    payload = json.dumps(build_data(report, doc), ensure_ascii=False, default=str).replace("</", "<\\/")
+    # «<» → < (валидный JSON): никакой текст документа не станет тегом внутри <script> с данными
+    payload = json.dumps(build_data(report, doc), ensure_ascii=False, default=str).replace("<", "\\u003c")
     return env.get_template("report.html.j2").render(data_json=payload, title=report["passport"]["document_title"])
 
 

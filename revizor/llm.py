@@ -457,8 +457,8 @@ class LLMClient:
         if found is None and self.replay:
             found = self._find_by_prompt(prompt_key)
         if found:
-            data = json.loads(found.read_text(encoding="utf-8"))
             try:
+                data = json.loads(found.read_text(encoding="utf-8"))
                 obj = schema.model_validate_json(extract_json(data["text"]))
                 self.calls.append(
                     CallRecord(
@@ -471,8 +471,8 @@ class LLMClient:
                     )
                 )
                 return obj
-            except (ValidationError, KeyError, json.JSONDecodeError):
-                pass  # битый кэш — запрашиваем заново
+            except (ValidationError, KeyError, TypeError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+                pass  # битый или нечитаемый файл кэша — запрашиваем модель заново
         if self.replay:
             raise CacheMiss(f"Режим --replay: нет сохранённого ответа для агента «{agent}».")
         if self.real_calls >= self.max_calls:
@@ -516,15 +516,18 @@ class LLMClient:
         )
         self.calls.append(record)
         if path:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                json.dumps(
-                    {"agent": agent, "model": self.model, "prompt_key": prompt_key, "text": text, "meta": meta},
-                    ensure_ascii=False,
-                    indent=1,
-                ),
-                encoding="utf-8",
-            )
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    json.dumps(
+                        {"agent": agent, "model": self.model, "prompt_key": prompt_key, "text": text, "meta": meta},
+                        ensure_ascii=False,
+                        indent=1,
+                    ),
+                    encoding="utf-8",
+                )
+            except OSError as err:  # ответ модели уже получен (и оплачен квотой) — не теряем его из-за кэша
+                self.on_wait(f"не удалось сохранить ответ в кэш ({err.__class__.__name__}); прогон продолжается")
         return obj
 
     def _throttle(self):
