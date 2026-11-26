@@ -736,6 +736,29 @@ def _to_int(s: str) -> int:
     return int(re.sub(r"\D", "", s))
 
 
+_MONEY_UNIT_AFTER = re.compile(r"\s*(?:₸|тенге|тг\b|KZT|тиын|руб|\$|USD|RUB|доллар)", re.I)
+_CLAUSE_SPLIT = re.compile(r"[,;]|\s(?:и|или|а также)\s")
+
+
+def _range_family(text: str, m: re.Match) -> str | None:
+    """К какой денежной величине относится диапазон, или None, если он не денежный.
+
+    В строке таблицы величину называет вся строка (имя параметра, описание). В обычном тексте — только
+    своя часть фразы: в «сумму от 5 000 до 2 000 000 ₸ и день месяца от 1 до 28» второй диапазон — не сумма.
+    """
+
+    def family_in(s: str) -> str | None:
+        return next((f for f in _FAMILY_PRIORITY if _QUANTITY_FAMILIES[f].search(s)), None)
+
+    if text.lstrip().startswith("|"):
+        return family_in(text)
+    own = family_in(_CLAUSE_SPLIT.split(text[: m.start()])[-1])
+    if own:
+        return own
+    # «Комиссия 1% от суммы, от 50 до 1 000 ₸» — величина названа раньше, но денежная единица стоит у диапазона
+    return family_in(text) if _MONEY_UNIT_AFTER.match(text, m.end()) else None
+
+
 def check_range_consistency(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
     """«Ф-2: от 100 до 500 000 ₸» против «API: amount 1–1 000 000» — у одной величины разные границы."""
     by_family: dict[str, list[tuple[tuple[int, int], int, str]]] = defaultdict(list)
@@ -746,9 +769,9 @@ def check_range_consistency(doc: Document, loc: QuoteLocator) -> list[RuleHit]:
             lo, hi = _to_int(m.group(1)), _to_int(m.group(2))
             if lo >= hi or hi < 10:  # «1–3», перевёрнутые и вырожденные диапазоны — не границы сумм
                 continue
-            # диапазон относится к самой конкретной величине, названной в строке: «Комиссия 1% от суммы,
-            # от 50 до 1 000» — это комиссия; «amount … Порог в тенге» — порог; «сумма» — только если иного нет
-            family = next((f for f in _FAMILY_PRIORITY if _QUANTITY_FAMILIES[f].search(ln.text)), None)
+            # диапазон относится к самой конкретной величине: «Комиссия 1% от суммы, от 50 до 1 000 ₸» — это
+            # комиссия; «amount … Порог в тенге» — порог; «сумма» — только если иного нет
+            family = _range_family(ln.text, m)
             if family:
                 by_family[family].append(((lo, hi), ln.no, m.group(0).strip()))
     hits = []

@@ -50,3 +50,13 @@ def test_non_money_ranges_are_ignored(tmp_path):
         "Время работы 09:00–18:00, сутки 00:00:00–23:59:59.\n"
     )
     assert _hits(text, tmp_path) == []
+
+
+def test_other_quantity_in_the_same_sentence_is_not_money(tmp_path):
+    # «день месяца от 1 до 28» стоит в одной фразе с суммой, но это не граница суммы
+    text = (
+        "# ТЗ\n\n## Функциональные требования\n"
+        "* **AP-1.** Клиент выбирает сумму от 5 000 до 2 000 000 ₸ и день месяца от 1 до 28.\n"
+        "* **AP-2.** Сумма пополнения — от 5 000 до 2 000 000 ₸.\n"
+    )
+    assert _hits(text, tmp_path) == []
