@@ -78,6 +78,12 @@ AcceptanceVerdict = Literal["совпадает", "противоречит", "�
 class AcceptanceCheckOut(BaseModel):
     acceptance_quote: str = Field(description="Дословная цитата строки критерия приёмки")
     acceptance_line: int
+    row_facts: str = Field(
+        description=(
+            "Факты строки до вывода: каждое событие отдельно — что, когда (дата и время), сколько; "
+            "отдельно исходные условия и действие (например, дата совершения покупки и дата проведения)"
+        )
+    )
     requirement_ids: list[str] = Field(description="R-xx требований, которые проверяет строка")
     requirement_quote: str = Field(description="Дословная цитата требования, из которого выведен ожидаемый результат")
     requirement_line: int

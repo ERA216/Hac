@@ -159,6 +159,7 @@ def _review(name):
             dict(
                 acceptance_quote="Итог 50 000 ₸ и один push",
                 acceptance_line=63,
+                row_facts="Расходы 48 500, порог 50 000; покупка 1 500",
                 requirement_ids=["R-03"],
                 requirement_quote="клиент получает push",
                 requirement_line=39,
@@ -170,6 +171,7 @@ def _review(name):
             dict(
                 acceptance_quote="Февральский счётчик вырос на 4 000 ₸",
                 acceptance_line=64,
+                row_facts="Покупка совершена 31.01 в 23:58; проведена 01.02 в 00:03",
                 requirement_ids=["R-02"],
                 requirement_quote="Месяц определяется по дате совершения покупки в Алматы",
                 requirement_line=38,
