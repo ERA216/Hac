@@ -28,9 +28,9 @@
 git clone https://github.com/ERA216/Hac.git
 cd Hac
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\activate          # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
-copy .env.example .env
+copy .env.example .env          # Linux/macOS: cp .env.example .env
 ```
 
 В `.env` впишите `GEMINI_API_KEY=ваш_ключ`, затем:
@@ -134,7 +134,7 @@ python -m revizor examples/requirements.md reports/answered/report.md --replay -
 1. Откройте [Google AI Studio](https://aistudio.google.com/) и нажмите **Get API key**, затем **Create API key**. Бесплатного тарифа достаточно.
 2. Скопируйте пример конфига и впишите ключ:
    ```powershell
-   copy .env.example .env
+   copy .env.example .env          # Linux/macOS: cp .env.example .env
    ```
    В файле `.env` укажите `GEMINI_API_KEY=ваш_ключ`. Файл `.env` в git не попадает.
 3. Проверьте окружение одной командой: Python, зависимости, ключ, доступность моделей, Ollama, кэш, запись отчётов. Квота при этом не тратится.
