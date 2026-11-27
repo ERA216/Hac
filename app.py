@@ -60,7 +60,7 @@ with st.sidebar:
     mode = MODES[mode_label]
     replay = mode == "replay"
     provider = "ollama" if mode == "ollama" else "gemini"
-    placeholder = os.getenv("OLLAMA_MODEL", "qwen3:4b") if provider == "ollama" else os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    placeholder = os.getenv("OLLAMA_MODEL", "qwen3:4b") if provider == "ollama" else os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     model = st.text_input("Модель", value="", placeholder=f"из .env ({placeholder})", disabled=replay)
     use_cache = st.toggle("Кэш ответов модели", value=True, help="Повторная проверка того же документа не тратит квоту")
     st.divider()

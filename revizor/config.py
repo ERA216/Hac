@@ -12,9 +12,9 @@ from .llm import LLMClient
 
 ROOT = Path(__file__).resolve().parent.parent
 REPLAY_CACHE = ROOT / "reports" / "llm-cache"
-DEFAULT_MODELS = {"gemini": "gemini-3.8-flash", "openai": "gpt-4o-mini", "ollama": "qwen3:4b"}
+DEFAULT_MODELS = {"gemini": "gemini-3.6-flash", "openai": "gpt-4o-mini", "ollama": "qwen3:4b"}
 DEFAULT_FALLBACKS = {
-    "gemini": "gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash",
+    "gemini": "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash",
     "openai": "",
 }
 
