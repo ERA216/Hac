@@ -1,0 +1,7 @@
+# Веб-интерфейс доступен только с этого компьютера: в нём загружаются документы и используется ваш ключ модели.
+# Чтобы открыть его с другого устройства в сети, запустите: streamlit run app.py --server.address 0.0.0.0
+[server]
+address = "localhost"
+
+[browser]
+gatherUsageStats = false
