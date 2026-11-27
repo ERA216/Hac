@@ -62,7 +62,10 @@ def _fatal_reason(err: Exception) -> str | None:
         re.search(r"API_KEY_INVALID|API key not valid|API key expired|invalid[_ ]api[_ ]key|Incorrect API key", s, re.I)
         or code == 401
     ):
-        return "ключ API недействителен или просрочен — проверьте GEMINI_API_KEY / OPENAI_API_KEY в .env"
+        return (
+            "ключ API недействителен или просрочен — проверьте GEMINI_API_KEY / OPENAI_API_KEY в .env "
+            "или ключ в поле веб-интерфейса"
+        )
     if isinstance(err, urllib.error.URLError) and not isinstance(err, urllib.error.HTTPError):
         reason = getattr(err, "reason", None)
         if isinstance(reason, ConnectionRefusedError) or re.search(r"refused|10061|actively refused", str(reason), re.I):

@@ -13,7 +13,7 @@ import streamlit as st
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from revizor import __version__
-from revizor.config import ROOT, llm_from_env, load_env
+from revizor.config import ROOT, gemini_key, llm_from_env, load_env
 from revizor.document import SUPPORTED, load_document
 from revizor.llm import LLMError
 from revizor.orchestrator import Pipeline
@@ -63,6 +63,18 @@ with st.sidebar:
     provider = "ollama" if mode == "ollama" else "gemini"
     placeholder = os.getenv("OLLAMA_MODEL", "qwen3:4b") if provider == "ollama" else os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     model = st.text_input("Модель", value="", placeholder=f"из .env ({placeholder})", disabled=replay)
+    key_found = bool(gemini_key())
+    entered_key = st.text_input(
+        "Ключ Gemini",
+        type="password",
+        key="api_key_input",
+        placeholder="уже задан — можно не заполнять" if key_found else "вставьте ключ из AI Studio",
+        disabled=provider != "gemini" or replay,
+        help="Ключ хранится только в памяти этой вкладки и никуда не записывается. Пустое поле — ключ из .env "
+        "или переменной окружения GEMINI_API_KEY; правку .env интерфейс подхватывает без перезапуска.",
+    )
+    if provider == "gemini" and not replay and not key_found and not entered_key.strip():
+        st.caption("Нет ключа? [Получить бесплатно в Google AI Studio](https://aistudio.google.com/apikey)")
     use_cache = st.toggle("Кэш ответов модели", value=True, help="Повторная проверка того же документа не тратит квоту")
     st.divider()
     st.markdown(
@@ -121,6 +133,7 @@ def make_llm(box):
         cache_dir=(ROOT / ".cache" / "llm") if use_cache or replay else None,
         replay=replay,
         on_wait=lambda msg: box.write(f"⏳ {msg}"),
+        api_key=gemini_key(entered_key) if provider == "gemini" else None,
     )
 
 
@@ -141,11 +154,10 @@ def key_problem() -> str | None:
     """Нет ключа Gemini и не включён режим «только кэш» — объясняем сразу, а не после минуты ожидания."""
     if replay or provider != "gemini":
         return None
-    key = os.getenv("GEMINI_API_KEY", "")
-    if not key or key.startswith("your_"):
+    if not gemini_key(entered_key):
         return (
-            "Не задан ключ GEMINI_API_KEY. Скопируйте .env.example в .env, впишите ключ из "
-            "https://aistudio.google.com/ и перезапустите интерфейс. Без ключа выберите режим «Только кэш» "
+            "Нет ключа Gemini. Вставьте ключ в поле «Ключ Gemini» слева (бесплатно: https://aistudio.google.com/apikey) "
+            "или впишите GEMINI_API_KEY в .env — перезапуск не нужен. Без ключа выберите режим «Только кэш» "
             "и возьмите пример ТЗ хакатона."
         )
     return None
@@ -167,7 +179,7 @@ if st.button("Проверить документ", type="primary", disabled=not
             st.session_state["run"] = (state, llm)
             box.update(label="Проверка завершена", state="complete", expanded=False)
         except (LLMError, ValueError, FileNotFoundError) as e:
-            box.update(label="Ошибка", state="error")
+            box.update(label="Ошибка", state="error", expanded=True)  # причина сразу на виду, а не в свёрнутом блоке
             st.error(str(e))
 
 # ------------------------------------------------------------------ results
@@ -239,7 +251,7 @@ if run:
                             box.update(label=f"Перепроверка завершена: {note}", state="complete")
                             st.rerun()
                         except LLMError as e:
-                            box.update(label="Ошибка", state="error")
+                            box.update(label="Ошибка", state="error", expanded=True)
                             st.error(str(e))
 
     with tab_report:

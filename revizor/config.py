@@ -6,7 +6,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 from .llm import LLMClient
 
@@ -19,9 +19,37 @@ DEFAULT_FALLBACKS = {
 }
 
 
+# ключ из переменной окружения до чтения .env: у неё приоритет над .env, как у load_dotenv
+_SHELL_GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+
+def _env_files() -> list[Path]:
+    return [Path.cwd() / ".env", ROOT / ".env"]
+
+
 def load_env() -> None:
-    load_dotenv(Path.cwd() / ".env")
-    load_dotenv(ROOT / ".env")
+    for path in _env_files():
+        load_dotenv(path)
+
+
+def usable_key(key: str | None) -> str:
+    """Ключ без пробелов; пустая строка, если ключа нет или в .env осталась заглушка из .env.example."""
+    key = (key or "").strip()
+    return "" if not key or key.startswith("your_") else key
+
+
+def gemini_key(entered: str = "") -> str:
+    """Ключ Gemini для веб-интерфейса: поле ввода → переменная окружения → .env.
+
+    .env перечитывается при каждом вызове, поэтому ключ, вписанный в файл при запущенном интерфейсе,
+    подхватывается без перезапуска.
+    """
+    if key := usable_key(entered) or usable_key(_SHELL_GEMINI_KEY):
+        return key
+    for path in _env_files():
+        if path.exists() and (key := usable_key(dotenv_values(path).get("GEMINI_API_KEY"))):
+            return key
+    return ""
 
 
 def llm_from_env(
@@ -34,27 +62,29 @@ def llm_from_env(
     max_calls: int | None = None,
     rpm: float | None = None,
     on_wait: Callable[[str], None] | None = None,
+    api_key: str | None = None,
 ) -> LLMClient:
+    """api_key — ключ, введённый в веб-интерфейсе; без него ключ берётся из окружения (.env)."""
     provider = provider or os.getenv("LLM_PROVIDER") or "gemini"  # пустая переменная окружения — тоже gemini
     if provider == "gemini":
-        api_key = os.getenv("GEMINI_API_KEY", "")
+        key = api_key or os.getenv("GEMINI_API_KEY") or ""
         model = model or os.getenv("GEMINI_MODEL") or DEFAULT_MODELS["gemini"]
         fallbacks = fallback_models or os.getenv("GEMINI_FALLBACK_MODELS") or DEFAULT_FALLBACKS["gemini"]
     elif provider == "ollama":  # локальная модель: данные не покидают контур, лимита частоты нет
-        api_key = ""
+        key = ""
         model = model or os.getenv("OLLAMA_MODEL") or DEFAULT_MODELS["ollama"]
         fallbacks = fallback_models or os.getenv("OLLAMA_FALLBACK_MODELS") or ""
         base_url = base_url or os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434"
         rpm = 0 if rpm is None else rpm
     else:
-        api_key = os.getenv("OPENAI_API_KEY", "")
+        key = api_key or os.getenv("OPENAI_API_KEY") or ""
         model = model or os.getenv("OPENAI_MODEL") or DEFAULT_MODELS["openai"]
         fallbacks = fallback_models or os.getenv("OPENAI_FALLBACK_MODELS") or ""
     temperature = os.getenv("LLM_TEMPERATURE")
     return LLMClient(
         provider=provider,
         model=model,
-        api_key=api_key,
+        api_key=key,
         base_url=base_url or os.getenv("OPENAI_BASE_URL"),
         cache_dir=cache_dir,
         replay=replay,
