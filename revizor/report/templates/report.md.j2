@@ -49,6 +49,9 @@
 | Дата и время прогона | {{ state.started_at.strftime("%d.%m.%Y %H:%M") }} (Алматы, UTC+5) |
 | Модель | {{ llm.provider }} / `{{ llm.model }}`{% if llm.model_versions %}; фактическая версия: {% for v in llm.model_versions %}`{{ v | t }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %} |
 | Версия агента | {{ agent_version | cell }} |
+{% if rebuilt_by %}
+| Оформление отчёта | пересобрано версией {{ rebuilt_by | cell }} из report.json, без обращения к модели; данные прогона не менялись |
+{% endif %}
 | Вызовы LLM | {{ calls | length }} (новых: {{ real_calls }}, из кэша: {{ cached_calls }}); токены: вход {{ tokens_in }}, выход {{ tokens_out }} |
 | Длительность | {{ total_seconds }} с |
 | Проверка цитат | проверено {{ state.quotes_checked }}, подтверждено {{ state.quotes_verified }}; находок отброшено как неподтверждённые: {{ state.unverified | length }} |

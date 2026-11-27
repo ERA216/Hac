@@ -62,7 +62,7 @@ def _who(value) -> str:
     return ", ".join(out)
 
 
-def build_context(state: RunState, llm: LLMClient) -> dict:
+def build_context(state: RunState, llm: LLMClient, version: str | None = None, rebuilt_by: str | None = None) -> dict:
     doc = state.doc
     reqs = {r.rid: r for r in state.requirements}
     findings = state.findings
@@ -155,7 +155,8 @@ def build_context(state: RunState, llm: LLMClient) -> dict:
         "tokens_in": sum(c.prompt_tokens for c in calls),
         "tokens_out": sum(c.output_tokens + c.thoughts_tokens for c in calls),
         "total_seconds": round(total_seconds),
-        "agent_version": agent_version(),
+        "agent_version": version or agent_version(),
+        "rebuilt_by": rebuilt_by,
         "criteria": CRITERIA,
         "SEV": SEVERITY_NAMES,
         "ICON": SEVERITY_ICONS,
@@ -165,7 +166,8 @@ def build_context(state: RunState, llm: LLMClient) -> dict:
     }
 
 
-def render_markdown(state: RunState, llm: LLMClient) -> str:
+def render_markdown(state: RunState, llm: LLMClient, version: str | None = None, rebuilt_by: str | None = None) -> str:
+    """Markdown-отчёт. version и rebuilt_by — при пересборке из report.json (версия исходного прогона)."""
     env = Environment(
         loader=FileSystemLoader(TEMPLATES),
         autoescape=False,
@@ -177,7 +179,7 @@ def render_markdown(state: RunState, llm: LLMClient) -> str:
     env.filters["q"] = _quote
     env.filters["who"] = _who
     env.filters["t"] = _no_html  # свободный текст (документ, ответы модели) — без исполняемой разметки
-    text = env.get_template("report.md.j2").render(**build_context(state, llm))
+    text = env.get_template("report.md.j2").render(**build_context(state, llm, version, rebuilt_by))
     # не более одной пустой строки подряд
     out, blank = [], 0
     for line in text.splitlines():

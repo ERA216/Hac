@@ -72,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if len(argv) < 2:
         print("Использование: python -m revizor.report <report.json> <документ> [<report.html>]")
+        print("Пересобирает HTML и Markdown (рядом с HTML) из сохранённого прогона, без обращения к модели.")
         return 2
     report_path, doc_path = Path(argv[0]), Path(argv[1])
     out = Path(argv[2]) if len(argv) > 2 else report_path.with_suffix(".html")
@@ -79,8 +80,14 @@ def main(argv: list[str] | None = None) -> int:
     doc = load_document(doc_path)
     if doc.sha256 != report["passport"]["sha256"]:
         print("Внимание: документ отличается от того, по которому построен отчёт (SHA-256 не совпадает).")
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(report, doc), encoding="utf-8")
     print(f"HTML-отчёт: {out}")
+    from ..version import agent_version
+    from .rebuild import rebuild
+
+    md = rebuild(report, doc, out.with_suffix(".md"), rebuilt_by=agent_version())
+    print(f"Markdown-отчёт: {md} (паспорт исходного прогона: {report['passport']['agent_version']})")
     return 0
 
 
