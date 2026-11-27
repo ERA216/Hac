@@ -32,7 +32,7 @@ def test_pair_checks_in_all_report_formats():
     llm = FakeLLM()
     state = Pipeline(llm).run(load_document(DOC))
     md = render_markdown(state, llm)
-    assert "Попарная сверка требований" in md and "❌ противоречат" in md and "✅ совместимы" in md
+    assert "### 4.5. Попарная сверка требований" in md and "❌ противоречат" in md and "✅ совместимы" in md
     assert len(to_json(state, llm)["pair_checks"]) == 2
     html = render_html_report(state, llm)
     payload = html.split('<script id="data" type="application/json">', 1)[1].split("</script>", 1)[0]

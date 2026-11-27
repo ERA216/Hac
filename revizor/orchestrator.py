@@ -47,6 +47,7 @@ from .schemas import (
     VerdictOut,
 )
 from .segmentation import chunk_ranges, numbered_range, rule_segments
+from .textfix import fix_model
 from .verify import QuoteLocator, clean_line, dedupe_evidence
 
 ALMATY = timezone(timedelta(hours=5), "Алматы")
@@ -137,6 +138,31 @@ class RunState:
 
 
 AskAnswers = Callable[[list[Question]], dict[str, str]]
+
+
+def polish_texts(state: RunState) -> None:
+    """Исправить слова со смешанной раскладкой в итоговом тексте («сменa» с латинской «a» → «смена»).
+
+    Делается в конце прогона, а не на ответах модели: иначе исправленный текст попадал бы в промпты
+    следующих агентов, и сохранённые ответы для --replay перестали бы находиться.
+    """
+    groups: list[list] = [
+        state.requirements,
+        state.candidates,
+        state.findings,
+        state.rejected,
+        state.questions,
+        state.tests,
+        state.acceptance,
+        state.pairs,
+        state.checklist,
+        state.trace,
+    ]
+    for group in groups:
+        for item in group:
+            fix_model(item)
+    if state.verdict:
+        fix_model(state.verdict)
 
 
 class Pipeline:
@@ -440,6 +466,7 @@ class Pipeline:
         if self.ask_answers and state.questions:
             self.apply_answers(state, self.ask_answers(state.questions))
 
+        polish_texts(state)
         state.finished_at = datetime.now(ALMATY)
         return state
 
@@ -464,6 +491,7 @@ class Pipeline:
             "LLM",
             lambda: self._recheck(state, loc, base_ctx, requirements_table(state.requirements), answered),
         )
+        polish_texts(state)
         state.finished_at = datetime.now(ALMATY)
         return state.steps[-1].note
 
