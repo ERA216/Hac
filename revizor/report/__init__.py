@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
@@ -17,6 +18,18 @@ from ..version import agent_version
 from .html import AGENT_NAMES, render_html
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
+
+
+_ABSENCE = re.compile(r"^(отсутств|нет\s|не\s+(предусмотрен|задан|описан|определ|указан)|не хватает)", re.I)
+
+
+def is_extra_risk(f) -> bool:
+    """Предложение добавить защитную меру, о которой документ молчит (rate limiting, 2FA, аудит, флаг отключения).
+
+    Это не дефект существующей формулировки, поэтому показывается отдельно. Критичные риски и риски в конкретных
+    формулировках («cardId передаётся в строке запроса») остаются среди дефектов.
+    """
+    return f.criterion == "risk" and f.severity != "critical" and bool(_ABSENCE.match(f.title.strip()))
 
 
 def _no_html(s: str) -> str:
@@ -78,8 +91,11 @@ def build_context(state: RunState, llm: LLMClient) -> dict:
             }
         )
 
-    req_findings = [f for f in findings if f.requirement_ids]
-    set_findings = [f for f in findings if not f.requirement_ids]
+    # некритичные риски ИБ и эксплуатации (2FA, rate limiting, аудит…) — не дефекты формулировок по 29148 и IEEE 830:
+    # отдельный подраздел, чтобы не смешивать их с дефектами требований; в подсчётах они остаются
+    risk_findings = [f for f in findings if is_extra_risk(f)]
+    req_findings = [f for f in findings if f.requirement_ids and not is_extra_risk(f)]
+    set_findings = [f for f in findings if not f.requirement_ids and not is_extra_risk(f)]
 
     set_criteria = []
     for code, c in CRITERIA.items():
@@ -113,6 +129,7 @@ def build_context(state: RunState, llm: LLMClient) -> dict:
         "req_rows": req_rows,
         "req_findings": req_findings,
         "set_findings": set_findings,
+        "risk_findings": risk_findings,
         "set_criteria": set_criteria,
         "by_criterion": sorted(by_criterion.items(), key=lambda kv: -kv[1]),
         "clean_reqs": clean_reqs,

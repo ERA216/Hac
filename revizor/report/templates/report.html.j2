@@ -174,6 +174,9 @@ function defectCard(f){
     ${f.rewrite ? `<div class="rewrite"><b>Предлагаемая формулировка:</b> ${esc(f.rewrite)}</div>` : ''}
   </article>`;
 }
+// предложения добавить защитную меру, о которой документ молчит, — отдельным блоком после дефектов формулировок
+const isRisk = f => f.criterion === 'risk' && f.severity !== 'critical'
+  && /^(отсутств|нет\s|не\s+(предусмотрен|задан|описан|определ|указан)|не хватает)/i.test(f.title.trim());
 function renderDefects(){
   const crits = [...new Set(D.findings.map(f => f.criterion))];
   const list = D.findings.filter(f => state.sev.has(f.severity) && (!state.crit || f.criterion === state.crit)
@@ -192,7 +195,10 @@ function renderDefects(){
       <span class="meta">Показано: ${list.length} из ${D.findings.length}</span>
       <button class="btn ghost" id="dl-csv" title="Для Excel и импорта в Jira">Скачать CSV</button>
     </div>
-    ${list.map(defectCard).join('') || '<p class="meta">Нет дефектов по выбранным фильтрам.</p>'}`;
+    ${list.filter(f => !isRisk(f)).map(defectCard).join('') || (list.some(isRisk) ? '' : '<p class="meta">Нет дефектов по выбранным фильтрам.</p>')}
+    ${list.some(isRisk) ? `<h3 style="margin-top:24px">Рекомендации ИБ и эксплуатации (дополнительно к критериям 29148 и IEEE 830)</h3>
+      <p class="meta">Защитные меры, о которых документ молчит: это предложения добавить требования по чек-листу ревью банка, а не дефекты существующих формулировок. Учтены в общем числе дефектов; критичные риски и риски в конкретных формулировках показаны выше, среди дефектов.</p>
+      ${list.filter(isRisk).map(defectCard).join('')}` : ''}`;
   document.querySelectorAll('[data-sev]').forEach(b => b.onclick = () => { const s=b.dataset.sev; state.sev.has(s)?state.sev.delete(s):state.sev.add(s); renderDefects(); });
   $('f-crit').onchange = e => { state.crit = e.target.value; renderDefects(); };
   $('f-q').oninput = e => { state.q = e.target.value.toLowerCase(); clearTimeout(window._t); window._t = setTimeout(() => { renderDefects(); $('f-q').focus(); const v=$('f-q').value; $('f-q').setSelectionRange(v.length,v.length); }, 250); };

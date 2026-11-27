@@ -106,3 +106,28 @@ def test_question_coverage_of_serious_defects_is_reported():
     assert state.asked("critical") == (total, total)
     assert f"Вопросы покрывают {total} из {total} критичных" in render_markdown(state, llm)
     assert to_json(state, llm)["question_coverage"]["critical"] == [total, total]
+
+
+def test_non_critical_risks_are_shown_apart_from_requirement_defects():
+    from revizor.document import load_document
+    from revizor.orchestrator import Pipeline
+    from revizor.report import render_html_report, render_markdown, to_json
+
+    from .fake_llm import FakeLLM
+    from .test_pipeline import DOC
+
+    llm = FakeLLM()
+    state = Pipeline(llm).run(load_document(DOC))
+    extra, blocking = state.findings[-1], state.findings[0]
+    extra.criterion, extra.severity, extra.title = "risk", "major", "Отсутствие аудита изменений настроек"
+    anchored = state.findings[-2]  # риск в конкретной формулировке документа — остаётся среди дефектов
+    anchored.criterion, anchored.severity, anchored.title = "risk", "major", "Передача cardId в строке запроса"
+    blocking.criterion, blocking.severity = "risk", "critical"
+    md = render_markdown(state, llm)
+    before, after = md.split("### 3.3. Рекомендации ИБ и эксплуатации", 1)
+    risk_section = after.split("## 4.", 1)[0]
+    assert f"#### 🟠 {extra.fid}. " in risk_section and f"{extra.fid}. " not in before.split("### 3.2.", 1)[1]
+    assert f"{blocking.fid}. " not in risk_section and f"#### 🔴 {blocking.fid}. " in md  # критичный — среди дефектов
+    assert f"{anchored.fid}. " not in risk_section and f"#### 🟠 {anchored.fid}. " in md
+    assert len(to_json(state, llm)["findings"]) == len(state.findings)  # подсчёты и данные не меняются
+    assert "isRisk" in render_html_report(state, llm)
