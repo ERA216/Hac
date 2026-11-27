@@ -70,8 +70,10 @@ def render_html(report: dict, doc: Document) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    want_pdf = "--pdf" in argv
+    argv = [a for a in argv if a != "--pdf"]
     if len(argv) < 2:
-        print("Использование: python -m revizor.report <report.json> <документ> [<report.html>]")
+        print("Использование: python -m revizor.report <report.json> <документ> [<report.html>] [--pdf]")
         print("Пересобирает HTML и Markdown (рядом с HTML) из сохранённого прогона, без обращения к модели.")
         return 2
     report_path, doc_path = Path(argv[0]), Path(argv[1])
@@ -88,6 +90,14 @@ def main(argv: list[str] | None = None) -> int:
 
     md = rebuild(report, doc, out.with_suffix(".md"), rebuilt_by=agent_version())
     print(f"Markdown-отчёт: {md} (паспорт исходного прогона: {report['passport']['agent_version']})")
+    if want_pdf:
+        from .pdf import export_pdf
+
+        try:
+            print(f"PDF-отчёт: {export_pdf(md)}")
+        except RuntimeError as e:
+            print(f"PDF не создан: {e}")
+            return 1
     return 0
 
 
