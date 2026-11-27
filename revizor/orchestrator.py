@@ -462,11 +462,14 @@ class Pipeline:
         # 7. Уточняющие вопросы
         self._step(state, "Агент уточнений", "LLM", lambda: self._clarify(state, base_ctx, reqs_text))
 
+        # итоговый текст исправляется до ответов: перепроверка из CLI (--answers) и из интерфейса получает
+        # одинаковый промпт, и сохранённый ответ агента перепроверки находится в обоих случаях
+        polish_texts(state)
+
         # 8. Ответы человека и перепроверка
         if self.ask_answers and state.questions:
             self.apply_answers(state, self.ask_answers(state.questions))
 
-        polish_texts(state)
         state.finished_at = datetime.now(ALMATY)
         return state
 

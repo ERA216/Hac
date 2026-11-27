@@ -123,6 +123,19 @@ def make_llm(box):
     )
 
 
+DEMO_ANSWERS = ROOT / "reports" / "answers.json"
+
+
+def demo_answers(state) -> dict[str, str] | None:
+    """Ответы демо-прогона — только для примера ТЗ хакатона (к другому документу они не относятся)."""
+    if not DEMO_ANSWERS.exists() or state.doc.sha256 != load_document(EXAMPLE).sha256:
+        return None
+    try:
+        return {k: str(v) for k, v in json.loads(DEMO_ANSWERS.read_text(encoding="utf-8")).items()}
+    except (OSError, ValueError):
+        return None
+
+
 def key_problem() -> str | None:
     """Нет ключа Gemini и не включён режим «только кэш» — объясняем сразу, а не после минуты ожидания."""
     if replay or provider != "gemini":
@@ -185,6 +198,19 @@ if run:
             st.write("Вопросов нет.")
         else:
             st.write("Ответьте на вопросы — агент перепроверит связанные дефекты и закроет те, что сняты ответами.")
+            demo = demo_answers(state)
+            if demo and st.button(
+                "Подставить ответы демо-прогона",
+                help="Ответы из reports/answers.json. Перепроверка с ними сохранена в reports/llm-cache, "
+                "поэтому работает и в режиме «Только кэш».",
+            ):
+                for q in state.questions:
+                    a = demo.get(q.qid, "").strip()
+                    if a.isdigit() and 1 <= int(a) <= len(q.options):
+                        st.session_state[f"r_{q.qid}"], st.session_state[f"t_{q.qid}"] = q.options[int(a) - 1], ""
+                    else:
+                        st.session_state[f"r_{q.qid}"], st.session_state[f"t_{q.qid}"] = "— пропустить —", a
+                st.rerun()
             with st.form("answers"):
                 answers = {}
                 for q in state.questions:

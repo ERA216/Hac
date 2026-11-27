@@ -38,3 +38,17 @@ def test_report_text_is_fixed_but_prompts_and_quotes_are_not():
 
     polish_texts(state)
     assert state.findings[0].evidence[0].quote == "сменa"  # цитата — буква в букву как в документе
+
+
+def test_cli_and_app_answers_give_the_same_recheck_prompt():
+    # CLI (--answers) применяет ответы внутри прогона, интерфейс — после него. Промпт перепроверки должен
+    # совпадать: тогда сохранённый ответ (reports/llm-cache) находится и в демо без ключа
+    answers = {"Q-01": "1", "Q-02": "свой ответ"}
+    cli = MixedScript()
+    Pipeline(cli, ask_answers=lambda qs: answers).run(load_document(DOC))
+    app = MixedScript()
+    pipe = Pipeline(app)
+    state = pipe.run(load_document(DOC))
+    pipe.apply_answers(state, answers)
+    assert cli.prompts["recheck"] == app.prompts["recheck"]
+    assert "Смена порога" in app.prompts["recheck"]  # исправленный текст отчёта
