@@ -1,0 +1,156 @@
+{
+ "passport": {
+  "document_title": "Уведомление о расходах по карте",
+  "file": "requirements.md",
+  "sha256": "e7dae55e5453a250d93e335f5ff9c7f775f4457ccddd333f4a67e47b20d74381",
+  "agent_version": "базовая линия: один промпт",
+  "model_versions": [
+   "gemini-3.6-flash"
+  ],
+  "quotes_checked": 9,
+  "quotes_verified": 9
+ },
+ "findings": [
+  {
+   "fid": "B-01",
+   "severity": "major",
+   "criterion": "risk",
+   "title": "Использование HTTP GET для операции изменения состояния",
+   "problem": "Метод сохранения порога описан как HTTP GET с передачей параметров изменения состояния в query-параметрах. Это нарушает спецификацию REST, приводит к логированию конфиденциальных данных в web-серверах и создаёт риски информационной безопасности и кэширования небезопасных запросов.",
+   "recommendation": "Изменить HTTP-метод соотвествующего API на POST или PUT, а параметры передавать в теле запроса (Request body).",
+   "rewrite": "| **REST type** | POST |",
+   "evidence": [
+    {
+     "quote": "REST type | GET",
+     "line_start": 104,
+     "line_end": 104,
+     "location": "Часть B. REST API › Общие параметры, строка 104",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "Request URL | Dev: /alerts/saveLimit . Prod: —",
+     "line_start": 108,
+     "line_end": 108,
+     "location": "Часть B. REST API › Общие параметры, строка 108",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-02",
+   "severity": "critical",
+   "criterion": "consistent",
+   "title": "Противоречие в кодах ответа и обработке ошибок при ошибке валидации",
+   "problem": "В разделе успешного ответа 200 OK приведён пример тела ответа с ошибкой result: ERROR, что противоречит спецификации статус-кода 400 Bad Request при неверных параметрах. Это делает обработку ошибок клиентом неоднозначной.",
+   "recommendation": "Удалить ответ с ошибкой из формата статуса 200 OK. Ошибки валидации параметров возвращать строго со статусом HTTP 400.",
+   "rewrite": "Удалить строки L169-L171 и зафиксировать возвращение ошибки валидации суммы в блоке статуса 400 Bad Request.",
+   "evidence": [
+    {
+     "quote": "{\"result\":\"ERROR\",\"message\":\"Проверьте сумму\"}",
+     "line_start": 171,
+     "line_end": 171,
+     "location": "Часть B. REST API › Статусы › 200. Successful — Created, строка 171",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "400. Ответ в случае, если параметры запроса заполнены неверно.",
+     "line_start": 163,
+     "line_end": 163,
+     "location": "Часть B. REST API › Статусы, строка 163",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-03",
+   "severity": "major",
+   "criterion": "consistent",
+   "title": "Несоответствие статуса ответа HTTP 403 и возвращаемого кода 404",
+   "problem": "Раздел заглавлен как 403 Forbidden, но описанное в нём поведение указывает на возврат статуса 404 Not Found. Это создаёт неясность для разработчиков и тестировщиков при реализации и проверке обработки доступа к чужой карте.",
+   "recommendation": "Переименовать подраздел в 404 Unsuccessful — Not Found или явно разделить кейсы для статусов 403 и 404.",
+   "rewrite": "#### 404. Unsuccessful — Not Found",
+   "evidence": [
+    {
+     "quote": "403. Unsuccessful — Forbidden",
+     "line_start": 188,
+     "line_end": 188,
+     "location": "Часть B. REST API › Статусы › 403. Unsuccessful — Forbidden, строка 188",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "Для чужой карты возвращается 404, как и для отсутствующей карты.",
+     "line_start": 189,
+     "line_end": 189,
+     "location": "Часть B. REST API › Статусы › 403. Unsuccessful — Forbidden, строка 189",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-04",
+   "severity": "major",
+   "criterion": "consistent",
+   "title": "Рассогласование типов данных полей в запросе и ответе API",
+   "problem": "Поле amount передаётся в запросе как integer, но в ответе специфицировано как string. Рассогласование типов вызывает лишние преобразования типов на клиенте и сервере и повышает риск ошибок парсинга.",
+   "recommendation": "Привести тип поля amount к единому типу integer (или string) в запросе и ответе.",
+   "rewrite": "| `amount` | integer | При успехе | Порог в тенге | `limit_kzt` |",
+   "evidence": [
+    {
+     "quote": "amount | integer | 32 bit | Да | 1 000–1 000 000 | Порог в тенге | limit_kzt",
+     "line_start": 143,
+     "line_end": 143,
+     "location": "Часть B. REST API › Параметры запроса › Query-параметры, строка 143",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "amount | string | При успехе | Порог в тенге | limit_kzt",
+     "line_start": 156,
+     "line_end": 156,
+     "location": "Часть B. REST API › Ответ, строка 156",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-05",
+   "severity": "minor",
+   "criterion": "set_complete",
+   "title": "Незаполненный раздел требований к тестированию",
+   "problem": "Раздел «Тестирование требований» содержит заглушку и не описан, что свидетельствует о неполноте документации требований.",
+   "recommendation": "Заполнить раздел реальными требованиями к тестированию либо вынести их в соответствующий тестовый план.",
+   "rewrite": "Указать условия и сценарии проверки требований к информированию о пороге расходов.",
+   "evidence": [
+    {
+     "quote": "заполняются тестировщиками",
+     "line_start": 57,
+     "line_end": 57,
+     "location": "Часть A. Новый функционал › Требования к тестированию › Тестирование требований, строка 57",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  }
+ ],
+ "questions": [],
+ "llm_calls": [
+  {
+   "agent": "baseline",
+   "model": "gemini-3.6-flash",
+   "model_version": "gemini-3.6-flash",
+   "cached": false,
+   "seconds": 48.6,
+   "prompt_tokens": 4644,
+   "output_tokens": 1262,
+   "thoughts_tokens": 1901,
+   "attempts": 1
+  }
+ ]
+}

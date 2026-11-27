@@ -1,0 +1,164 @@
+{
+ "passport": {
+  "document_title": "Уведомление о расходах по карте",
+  "file": "requirements.md",
+  "sha256": "e7dae55e5453a250d93e335f5ff9c7f775f4457ccddd333f4a67e47b20d74381",
+  "agent_version": "базовая линия: один промпт",
+  "model_versions": [
+   "gemini-3.6-flash"
+  ],
+  "quotes_checked": 10,
+  "quotes_verified": 10
+ },
+ "findings": [
+  {
+   "fid": "B-01",
+   "severity": "major",
+   "criterion": "consistent",
+   "title": "Использование HTTP-метода GET для оператора сохранения порога",
+   "problem": "HTTP-метод GET предназначен только для чтения данных без изменения состояния. Использование GET для изменения параметров системы создает риски безопасности и непредсказуемого поведения из-за кэширования браузерами и прокси-серверами.",
+   "recommendation": "Изменить метод REST API для сохранения настроек порога на POST или PUT и передавать параметры в теле запроса.",
+   "rewrite": "| **REST type** | POST |",
+   "evidence": [
+    {
+     "quote": "Description | Сохранение порога. Функциональные требования: чтение порога",
+     "line_start": 103,
+     "line_end": 103,
+     "location": "Часть B. REST API › Общие параметры, строка 103",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "REST type | GET",
+     "line_start": 104,
+     "line_end": 104,
+     "location": "Часть B. REST API › Общие параметры, строка 104",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-02",
+   "severity": "critical",
+   "criterion": "consistent",
+   "title": "Возврат статуса ответа 200 OK при ошибке бизнес-логики",
+   "problem": "При бизнес-ошибке система возвращает HTTP-статус 200 OK с результатом ERROR в теле. Это противоречит принципам проектирования REST API, ломает стандартную обработку ошибок на клиенте и усложняет мониторинг.",
+   "recommendation": "Возвращать соответствующий HTTP-код ошибки (например, 400 Bad Request) вместо ответа 200 OK при ошибочных входящих данных.",
+   "rewrite": "При отклонении суммы возвращать статус 400 Bad Request со структурой ошибки.",
+   "evidence": [
+    {
+     "quote": "200. Successful — Created",
+     "line_start": 165,
+     "line_end": 165,
+     "location": "Часть B. REST API › Статусы › 200. Successful — Created, строка 165",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "{\"result\":\"ERROR\",\"message\":\"Проверьте сумму\"}",
+     "line_start": 171,
+     "line_end": 171,
+     "location": "Часть B. REST API › Статусы › 200. Successful — Created, строка 171",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-03",
+   "severity": "major",
+   "criterion": "consistent",
+   "title": "Несоответствие типов данных параметров в запросе и ответе",
+   "problem": "В параметрах запроса поле amount указано как integer, а в ответе — как string. Это вызывает несогласованность типов при парсинге данных клиентским приложением.",
+   "recommendation": "Указать единый тип integer для поля amount в описании ответа API.",
+   "rewrite": "| `amount` | integer | При успехе | Порог в тенге | `limit_kzt` |",
+   "evidence": [
+    {
+     "quote": "amount | integer | 32 bit | Да | 1 000–1 000 000 | Порог в тенге | limit_kzt",
+     "line_start": 143,
+     "line_end": 143,
+     "location": "Часть B. REST API › Параметры запроса › Query-параметры, строка 143",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "amount | string | При успехе | Порог в тенге | limit_kzt",
+     "line_start": 156,
+     "line_end": 156,
+     "location": "Часть B. REST API › Ответ, строка 156",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-04",
+   "severity": "major",
+   "criterion": "consistent",
+   "title": "Противоречие в описании обработки статусов ответа 403 и 404",
+   "problem": "В подразделе для кодов ответа 403 указано, что при обращении к чужой карте возвращается статус 404. Это путает разработчиков и тестировщиков при реализации и проверке обработки ошибок доступа.",
+   "recommendation": "Раздельно вынести логику 403 (доступ запрещен) и 404 (ресурс не найден) или убрать упоминание 404 из раздела 403.",
+   "rewrite": "#### 404. Unsuccessful — Not Found\nВозвращается в случае, если карта не найдена или не принадлежит текущему пользователю.",
+   "evidence": [
+    {
+     "quote": "403. Unsuccessful — Forbidden",
+     "line_start": 188,
+     "line_end": 188,
+     "location": "Часть B. REST API › Статусы › 403. Unsuccessful — Forbidden, строка 188",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "Для чужой карты возвращается 404, как и для отсутствующей карты.",
+     "line_start": 189,
+     "line_end": 189,
+     "location": "Часть B. REST API › Статусы › 403. Unsuccessful — Forbidden, строка 189",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-05",
+   "severity": "minor",
+   "criterion": "set_complete",
+   "title": "Незаполненные разделы и шаблонные элементы требования",
+   "problem": "Раздел тестирования и блок ревью содержат незаполненные заглушки, что указывает на неполноту документа спецификации.",
+   "recommendation": "Заполнить требования к тестированию, проставить статусы и даты в блоке ревью и в таблице согласующих.",
+   "rewrite": "",
+   "evidence": [
+    {
+     "quote": "заполняются тестировщиками",
+     "line_start": 57,
+     "line_end": 57,
+     "location": "Часть A. Новый функционал › Требования к тестированию › Тестирование требований, строка 57",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "Документ (версия/дата) в источнике не заполнен. Пункты чек-листа приведены как в шаблоне, отметки не проставлены.",
+     "line_start": 68,
+     "line_end": 68,
+     "location": "Часть A. Новый функционал › Ревью требований, строка 68",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  }
+ ],
+ "questions": [],
+ "llm_calls": [
+  {
+   "agent": "baseline",
+   "model": "gemini-3.6-flash",
+   "model_version": "gemini-3.6-flash",
+   "cached": false,
+   "seconds": 334.8,
+   "prompt_tokens": 4748,
+   "output_tokens": 1275,
+   "thoughts_tokens": 3352,
+   "attempts": 2
+  }
+ ]
+}

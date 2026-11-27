@@ -1,0 +1,148 @@
+{
+ "passport": {
+  "document_title": "Уведомление о расходах по карте",
+  "file": "requirements.md",
+  "sha256": "e7dae55e5453a250d93e335f5ff9c7f775f4457ccddd333f4a67e47b20d74381",
+  "agent_version": "базовая линия: один промпт",
+  "model_versions": [
+   "gemini-3.6-flash"
+  ],
+  "quotes_checked": 8,
+  "quotes_verified": 8
+ },
+ "findings": [
+  {
+   "fid": "B-01",
+   "severity": "major",
+   "criterion": "risk",
+   "title": "Использование HTTP GET для изменения состояния сервера",
+   "problem": "Метод GET используется для сохранения настроек порога. Это нарушает стандарты HTTP (RFC 7231) и создаёт риски ИБ, так как чувствительные параметры передаются в URL и могут быть сохранены в логах серверов.",
+   "recommendation": "Изменить HTTP-метод на POST или PUT, а параметры запроса передавать в формате JSON в теле запроса.",
+   "rewrite": "Изменить метод REST API на POST `/alerts/saveLimit` с передачей параметров сохранения в формате JSON в теле запроса.",
+   "evidence": [
+    {
+     "quote": "GET",
+     "line_start": 104,
+     "line_end": 104,
+     "location": "Часть B. REST API › Общие параметры, строка 104",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "Dev: /alerts/saveLimit . Prod: —",
+     "line_start": 108,
+     "line_end": 108,
+     "location": "Часть B. REST API › Общие параметры, строка 108",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-02",
+   "severity": "critical",
+   "criterion": "consistent",
+   "title": "Возврат ошибки бизнеса со статусом HTTP 200",
+   "problem": "При бизнес-ошибке сохраняется код ответа HTTP 200 OK. Это противоречит стандарту REST API и затрудняет обработку ошибок клиентской частью.",
+   "recommendation": "Возвращать статус 400 Bad Request при ошибках валидации данных вместо 200 OK.",
+   "rewrite": "При ошибке валидации суммы сервер возвращает статус 400 Bad Request с описанием ошибки в теле ответа.",
+   "evidence": [
+    {
+     "quote": "200. Successful — Created",
+     "line_start": 165,
+     "line_end": 165,
+     "location": "Часть B. REST API › Статусы › 200. Successful — Created, строка 165",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "{\"result\":\"ERROR\",\"message\":\"Проверьте сумму\"}",
+     "line_start": 171,
+     "line_end": 171,
+     "location": "Часть B. REST API › Статусы › 200. Successful — Created, строка 171",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-03",
+   "severity": "major",
+   "criterion": "consistent",
+   "title": "Несоответствие HTTP-кода 403 и 404 в описании ответа",
+   "problem": "Заголовок подраздела указывает код 403 Forbidden, но текст требования предписывает возвращать статус 404 Not Found.",
+   "recommendation": "Привести заголовок подраздела и описание логики к единому HTTP-коду.",
+   "rewrite": "#### 404. Unsuccessful — Not Found\\nДля чужой или отсутствующей карты возвращается код 404.",
+   "evidence": [
+    {
+     "quote": "403. Unsuccessful — Forbidden",
+     "line_start": 188,
+     "line_end": 188,
+     "location": "Часть B. REST API › Статусы › 403. Unsuccessful — Forbidden, строка 188",
+     "verified": true,
+     "score": 100.0
+    },
+    {
+     "quote": "Для чужой карты возвращается 404, как и для отсутствующей карты.",
+     "line_start": 189,
+     "line_end": 189,
+     "location": "Часть B. REST API › Статусы › 403. Unsuccessful — Forbidden, строка 189",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-04",
+   "severity": "minor",
+   "criterion": "set_complete",
+   "title": "Незаполненный раздел требований к тестированию",
+   "problem": "Раздел содержит заглушку шаблона вместо конкретных требований к тестированию.",
+   "recommendation": "Заполнить раздел требованиями и проверочными сценариями.",
+   "rewrite": "",
+   "evidence": [
+    {
+     "quote": "заполняются тестировщиками",
+     "line_start": 57,
+     "line_end": 57,
+     "location": "Часть A. Новый функционал › Требования к тестированию › Тестирование требований, строка 57",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  },
+  {
+   "fid": "B-05",
+   "severity": "minor",
+   "criterion": "modifiable",
+   "title": "Отсутствие версионирования документа и согласования",
+   "problem": "Документ не содержит сведений о версии, дате и статусе ревью, что затрудняет контроль изменений.",
+   "recommendation": "Заполнить метаданные документа, версионирование и результаты проведения ревью.",
+   "rewrite": "",
+   "evidence": [
+    {
+     "quote": "Документ (версия/дата) в источнике не заполнен. Пункты чек-листа приведены как в шаблоне, отметки не проставлены.",
+     "line_start": 68,
+     "line_end": 68,
+     "location": "Часть A. Новый функционал › Ревью требований, строка 68",
+     "verified": true,
+     "score": 100.0
+    }
+   ]
+  }
+ ],
+ "questions": [],
+ "llm_calls": [
+  {
+   "agent": "baseline",
+   "model": "gemini-3.6-flash",
+   "model_version": "gemini-3.6-flash",
+   "cached": false,
+   "seconds": 42.2,
+   "prompt_tokens": 4756,
+   "output_tokens": 1022,
+   "thoughts_tokens": 3061,
+   "attempts": 2
+  }
+ ]
+}
