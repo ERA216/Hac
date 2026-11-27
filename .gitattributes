@@ -2,3 +2,9 @@
 *.pdf binary
 *.docx binary
 *.png binary
+# отчёты и результаты замеров — вывод агента, а не исходный код: не учитываются в статистике языков GitHub
+reports/** linguist-generated
+eval/baseline/** linguist-generated
+eval/runs/** linguist-generated
+eval/**/RESULTS.md linguist-generated
+docs/** linguist-documentation
