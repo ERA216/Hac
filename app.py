@@ -18,6 +18,7 @@ from revizor.document import SUPPORTED, load_document
 from revizor.llm import LLMError
 from revizor.orchestrator import Pipeline
 from revizor.report import render_html_report, render_markdown, to_json
+from revizor.report.pdf import export_pdf, find_browser
 
 load_env()
 st.set_page_config(page_title="Ревизор ТЗ", page_icon="🔎", layout="wide")
@@ -258,3 +259,20 @@ if run:
             file_name=f"{stem}_report.json",
             mime="application/json",
         )
+        # PDF печатает браузер (несколько секунд) — по кнопке, а не при каждом обновлении страницы;
+        # после перепроверки по ответам ключ меняется и PDF собирается заново
+        pdf_key = (state.doc.sha256, len(state.findings), sum(1 for f in state.findings if not f.is_open))
+        if find_browser():
+            if st.button("Подготовить PDF"):
+                with st.spinner("Печатаю PDF…"), tempfile.TemporaryDirectory() as tmp:
+                    md_file = Path(tmp) / f"{stem}_report.md"
+                    md_file.write_text(render_markdown(state, llm), encoding="utf-8")
+                    try:
+                        st.session_state["pdf"] = (pdf_key, export_pdf(md_file).read_bytes())
+                    except RuntimeError as e:
+                        st.error(str(e))
+            saved = st.session_state.get("pdf")
+            if saved and saved[0] == pdf_key:
+                st.download_button("Отчёт PDF", saved[1], file_name=f"{stem}_report.pdf", mime="application/pdf")
+        else:
+            st.caption("Для PDF нужен установленный Chrome, Edge или Chromium.")

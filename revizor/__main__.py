@@ -100,13 +100,56 @@ def _answers_from_file(path: Path):
     return lambda questions: answers
 
 
+class _RussianHelp(argparse.RawDescriptionHelpFormatter):
+    """Справка целиком по-русски: argparse по умолчанию пишет «usage:» и заголовки разделов по-английски."""
+
+    def add_usage(self, usage, actions, groups, prefix=None):
+        super().add_usage(usage, actions, groups, prefix="Запуск: ")
+
+
+EXAMPLES = """примеры:
+  python -m revizor examples/requirements.md reports/report.md
+      проверить ТЗ; рядом с отчётом появятся .html, .json и .csv
+  python -m revizor examples/requirements.md reports/report.md --replay
+      пересобрать финальный отчёт из сохранённых ответов модели, без ключа и сети
+  python -m revizor examples/requirements.md reports/report.md --answers reports/answers.json
+      учесть ответы на уточняющие вопросы и перепроверить дефекты
+  python -m revizor --check
+      проверить окружение перед первым запуском (квоту не тратит)"""
+
+
+_ARGPARSE_RU = [
+    ("unrecognized arguments", "неизвестные параметры"),
+    ("invalid int value", "нужно целое число, получено"),
+    ("invalid float value", "нужно число, получено"),
+    ("invalid choice", "недопустимое значение"),
+    ("choose from", "допустимо"),
+    ("expected one argument", "нужно значение"),
+    ("argument ", "параметр "),
+]
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str):  # type: ignore[override]
+        for en, ru in _ARGPARSE_RU:
+            message = message.replace(en, ru)
+        self.print_usage(sys.stderr)
+        self.exit(2, f"Ошибка в параметрах: {message}\nСправка: python -m revizor --help\n")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    p = _Parser(
         prog="python -m revizor",
         description="Ревизор ТЗ — мультиагентная проверка документа требований (ISO/IEC/IEEE 29148, IEEE 830).",
+        epilog=EXAMPLES,
+        formatter_class=_RussianHelp,
+        add_help=False,
     )
+    p._positionals.title = "аргументы"
+    p._optionals.title = "параметры"
+    p.add_argument("-h", "--help", action="help", help="показать эту справку и выйти")
     p.add_argument("input", nargs="?", help=f"файл требований ({', '.join(sorted(SUPPORTED))})")
-    p.add_argument("report", nargs="?", help="путь к отчёту (.md); рядом появятся .html и .json")
+    p.add_argument("report", nargs="?", help="путь к отчёту (.md); рядом появятся .html, .json и .csv")
     p.add_argument(
         "--provider",
         choices=["gemini", "openai", "ollama"],
@@ -120,7 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--answers", type=Path, help='файл ответов на вопросы (JSON {"Q-01": "…"} или строки «Q-01: …»)')
     p.add_argument("--replay", action="store_true", help="только сохранённые ответы модели (без сети и ключа)")
     p.add_argument("--no-cache", action="store_true", help="не использовать кэш ответов модели")
-    p.add_argument("--cache-dir", type=Path, default=ROOT / ".cache" / "llm")
+    p.add_argument("--cache-dir", type=Path, default=ROOT / ".cache" / "llm", help="каталог кэша ответов модели")
     p.add_argument("--max-calls", type=int, default=None, help="бюджет новых вызовов LLM на прогон (по умолчанию 12)")
     p.add_argument("--rpm", type=float, default=None, help="ограничение запросов в минуту (бесплатный Gemini — 5)")
     p.add_argument(
@@ -133,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--check", action="store_true", help="проверить окружение: зависимости, ключ, модели, Ollama (квоту не тратит)"
     )
-    p.add_argument("--version", action="version", version=f"revizor {__version__}")
+    p.add_argument("--version", action="version", version=f"revizor {__version__}", help="показать версию и выйти")
     return p
 
 
